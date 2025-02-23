@@ -3,9 +3,14 @@ from flask_cors import CORS
 from flask_mail import Mail, Message
 import os
 import requests
+import logging
 
 app = Flask(__name__)
 CORS(app)  # Allow requests from all origins
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Configure Flask-Mail
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'  # Use your email provider's SMTP server
@@ -26,8 +31,8 @@ telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID', '6864600775')  # Replace with y
 # Helper function to send Telegram message
 def send_telegram_message(message):
     try:
-        print("Sending Telegram message...")  # Log when sending a message
-        print("Message content:", message)  # Log the message content
+        logger.debug("Sending Telegram message...")  # Log when sending a message
+        logger.debug(f"Message content: {message}")  # Log the message content
 
         url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
         payload = {
@@ -36,10 +41,10 @@ def send_telegram_message(message):
         }
         response = requests.post(url, json=payload)  # Fixed missing parenthesis
         response.raise_for_status()  # Raise an error for bad status codes
-        print("Message sent successfully!")  # Log success
+        logger.debug("Message sent successfully!")  # Log success
         return True
     except Exception as e:
-        print(f"Failed to send Telegram message: {e}")  # Log any exceptions
+        logger.error(f"Failed to send Telegram message: {e}")  # Log any exceptions
         return False
 
 # Routes
@@ -50,9 +55,9 @@ def home():
 @app.route("/reservations", methods=["POST"])
 def create_reservation():
     try:
-        print("Request received at /reservations")  # Log when the endpoint is hit
+        logger.debug("Request received at /reservations")  # Log when the endpoint is hit
         data = request.json
-        print("Received data:", data)  # Log the received data
+        logger.debug(f"Received data: {data}")  # Log the received data
 
         required_fields = ["name", "email", "phone", "time", "date", "diners", "seating", "pickup"]
         if not all(field in data for field in required_fields):
@@ -87,31 +92,74 @@ def create_reservation():
         )
 
         if send_telegram_message(message):
-            # Send email confirmation
+            # Send initial email confirmation
             try:
                 msg = Message(
-                    subject="Reservation Confirmation",
+                    subject="Reservation Request Received",
                     sender=app.config['MAIL_USERNAME'],
                     recipients=[reservation['email']],
                     body=f"""
-                    Thank you for your reservation, {reservation['name']}!
+                    Thank you for your reservation request, {reservation['name']}!
                     Date: {reservation['date']}
                     Time: {reservation['time']}
                     Diners: {reservation['diners']}
                     Seating: {reservation['seating']}
                     Pickup: {reservation['pickup']}
+
+                    We will notify you once your reservation is confirmed.
                     """
                 )
                 mail.send(msg)
-                print("Email sent successfully!")
+                logger.debug("Initial email sent successfully!")
             except Exception as e:
-                print(f"Failed to send email: {e}")
+                logger.error(f"Failed to send initial email: {e}")
 
             return jsonify({"message": "Reservation created and confirmation email sent", "reservation": reservation})
         else:
             return jsonify({"message": "Reservation created but failed to send Telegram message", "reservation": reservation})
     except Exception as e:
-        print("Error in create_reservation:", e)  # Log any exceptions
+        logger.error(f"Error in create_reservation: {e}")  # Log any exceptions
+        abort(500, "Internal server error")
+
+@app.route("/confirm-reservation", methods=["POST"])
+def confirm_reservation():
+    try:
+        data = request.json
+        reservation_id = data.get("reservation_id")
+
+        # Find the reservation
+        reservation = next((r for r in reservations if r["id"] == reservation_id), None)
+        if not reservation:
+            abort(404, "Reservation not found")
+
+        # Update reservation status
+        reservation["status"] = "Confirmed"
+
+        # Send confirmation email
+        try:
+            msg = Message(
+                subject="Reservation Confirmed",
+                sender=app.config['MAIL_USERNAME'],
+                recipients=[reservation['email']],
+                body=f"""
+                Your reservation has been confirmed, {reservation['name']}!
+                Date: {reservation['date']}
+                Time: {reservation['time']}
+                Diners: {reservation['diners']}
+                Seating: {reservation['seating']}
+                Pickup: {reservation['pickup']}
+
+                We look forward to seeing you!
+                """
+            )
+            mail.send(msg)
+            logger.debug("Confirmation email sent successfully!")
+        except Exception as e:
+            logger.error(f"Failed to send confirmation email: {e}")
+
+        return jsonify({"message": "Reservation confirmed and email sent", "reservation": reservation})
+    except Exception as e:
+        logger.error(f"Error in confirm_reservation: {e}")
         abort(500, "Internal server error")
 
 @app.route("/reservations", methods=["GET"])
