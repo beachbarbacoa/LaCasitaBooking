@@ -1,6 +1,6 @@
 from flask import Flask, jsonify, request, abort
 from flask_cors import CORS
-from flask_mail import Mail, Message
+from Flask_Mail import Mail, Message
 import os
 import requests
 import logging
@@ -113,6 +113,7 @@ def create_reservation():
                 logger.debug("Initial email sent successfully!")
             except Exception as e:
                 logger.error(f"Failed to send initial email: {e}")
+                return jsonify({"message": "Reservation created but failed to send email", "error": str(e)})
 
             return jsonify({"message": "Reservation created and confirmation email sent", "reservation": reservation})
         else:
