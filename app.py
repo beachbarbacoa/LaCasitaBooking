@@ -1,10 +1,20 @@
 from flask import Flask, jsonify, request, abort
 from flask_cors import CORS
-import requests
+from flask_mail import Mail, Message
 import os
+import requests
 
 app = Flask(__name__)
-CORS(app)  # Allow requests from Expo Snack
+CORS(app)  # Allow requests from all origins
+
+# Configure Flask-Mail
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'  # Use your email provider's SMTP server
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')  # Your email address
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')  # Your email password
+
+mail = Mail(app)
 
 # In-memory "database" (using a list)
 reservations = []
@@ -24,7 +34,7 @@ def send_telegram_message(message):
             "chat_id": telegram_chat_id,
             "text": message
         }
-        response = requests.post(url, json=payload)
+        response = requests.post(url, json=payload)  # Fixed missing parenthesis
         response.raise_for_status()  # Raise an error for bad status codes
         print("Message sent successfully!")  # Log success
         return True
@@ -77,7 +87,27 @@ def create_reservation():
         )
 
         if send_telegram_message(message):
-            return jsonify({"message": "Reservation created and Telegram message sent", "reservation": reservation})
+            # Send email confirmation
+            try:
+                msg = Message(
+                    subject="Reservation Confirmation",
+                    sender=app.config['MAIL_USERNAME'],
+                    recipients=[reservation['email']],
+                    body=f"""
+                    Thank you for your reservation, {reservation['name']}!
+                    Date: {reservation['date']}
+                    Time: {reservation['time']}
+                    Diners: {reservation['diners']}
+                    Seating: {reservation['seating']}
+                    Pickup: {reservation['pickup']}
+                    """
+                )
+                mail.send(msg)
+                print("Email sent successfully!")
+            except Exception as e:
+                print(f"Failed to send email: {e}")
+
+            return jsonify({"message": "Reservation created and confirmation email sent", "reservation": reservation})
         else:
             return jsonify({"message": "Reservation created but failed to send Telegram message", "reservation": reservation})
     except Exception as e:
