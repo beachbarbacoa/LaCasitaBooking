@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: lacasitabooking
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: MAIL_USERNAME
+        value: colin.morritts@gmail.com
+      - key: MAIL_PASSWORD
+        value: testTESTtest1234
+      - key: TELEGRAM_BOT_TOKEN
+        value: 7619634541:AAHoWrA378nyG8--LAE7LMwtlKcsozRyFTI
+      - key: TELEGRAM_CHAT_ID
+        value: 6864600775
