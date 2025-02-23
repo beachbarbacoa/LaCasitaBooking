@@ -11,8 +11,8 @@ CORS(app)  # Allow requests from all origins
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'  # Use your email provider's SMTP server
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')  # Your email address
-app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')  # Your email password
+app.config['MAIL_USERNAME'] = os.getenv('colin.morritts@gmail.com')  # Your email address
+app.config['MAIL_PASSWORD'] = os.getenv('testTESTtest1234')  # Your email password
 
 mail = Mail(app)
 
