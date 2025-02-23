@@ -11,8 +11,8 @@ CORS(app)  # Allow requests from all origins
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'  # Use your email provider's SMTP server
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.getenv('colin.morritts@gmail.com')  # Your email address
-app.config['MAIL_PASSWORD'] = os.getenv('testTESTtest1234')  # Your email password
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')  # Your email address
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')  # Your email password
 
 mail = Mail(app)
 
@@ -88,20 +88,24 @@ def create_reservation():
 
         if send_telegram_message(message):
             # Send email confirmation
-            msg = Message(
-                subject="Reservation Confirmation",
-                sender=app.config['MAIL_USERNAME'],
-                recipients=[reservation['email']],
-                body=f"""
-                Thank you for your reservation, {reservation['name']}!
-                Date: {reservation['date']}
-                Time: {reservation['time']}
-                Diners: {reservation['diners']}
-                Seating: {reservation['seating']}
-                Pickup: {reservation['pickup']}
-                """
-            )
-            mail.send(msg)  # Fixed indentation
+            try:
+                msg = Message(
+                    subject="Reservation Confirmation",
+                    sender=app.config['MAIL_USERNAME'],
+                    recipients=[reservation['email']],
+                    body=f"""
+                    Thank you for your reservation, {reservation['name']}!
+                    Date: {reservation['date']}
+                    Time: {reservation['time']}
+                    Diners: {reservation['diners']}
+                    Seating: {reservation['seating']}
+                    Pickup: {reservation['pickup']}
+                    """
+                )
+                mail.send(msg)
+                print("Email sent successfully!")
+            except Exception as e:
+                print(f"Failed to send email: {e}")
 
             return jsonify({"message": "Reservation created and confirmation email sent", "reservation": reservation})
         else:
