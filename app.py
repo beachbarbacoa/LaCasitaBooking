@@ -1,9 +1,11 @@
 from flask import Flask, jsonify, request, abort
 from flask_cors import CORS
-from flask_mail import Mail, Message  # Corrected import
 import os
 import requests
 import logging
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 app = Flask(__name__)
 CORS(app)  # Allow requests from all origins
@@ -11,16 +13,6 @@ CORS(app)  # Allow requests from all origins
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
-
-# Configure Flask-Mail
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'  # Use your email provider's SMTP server
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')  # Your email address
-app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')  # Your email password
-app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_USERNAME')  # Default sender
-
-mail = Mail(app)
 
 # In-memory "database" (using a list)
 reservations = []
@@ -47,6 +39,31 @@ def send_telegram_message(message):
     except Exception as e:
         logger.error(f"Failed to send Telegram message: {e}")  # Log any exceptions
         return False
+
+# Helper function to send email using smtplib
+def send_email(subject, recipient, body):
+    try:
+        # Email configuration
+        sender_email = os.getenv('MAIL_USERNAME')
+        sender_password = os.getenv('MAIL_PASSWORD')
+        smtp_server = 'smtp.gmail.com'
+        smtp_port = 587
+
+        # Create the email
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = recipient
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+
+        # Send the email
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, recipient, msg.as_string())
+        logger.debug("Email sent successfully!")
+    except Exception as e:
+        logger.error(f"Failed to send email: {e}")
 
 # Routes
 @app.route("/")
@@ -94,28 +111,20 @@ def create_reservation():
 
         if send_telegram_message(message):
             # Send initial email confirmation
-            try:
-                msg = Message(
-                    subject="Reservation Request Received",
-                    sender=app.config['MAIL_USERNAME'],
-                    recipients=[reservation['email']],
-                    body=f"""
-                    Thank you for your reservation request, {reservation['name']}!
-                    Date: {reservation['date']}
-                    Time: {reservation['time']}
-                    Diners: {reservation['diners']}
-                    Seating: {reservation['seating']}
-                    Pickup: {reservation['pickup']}
+            send_email(
+                subject="Reservation Request Received",
+                recipient=reservation['email'],
+                body=f"""
+                Thank you for your reservation request, {reservation['name']}!
+                Date: {reservation['date']}
+                Time: {reservation['time']}
+                Diners: {reservation['diners']}
+                Seating: {reservation['seating']}
+                Pickup: {reservation['pickup']}
 
-                    We will notify you once your reservation is confirmed.
-                    """
-                )
-                mail.send(msg)
-                logger.debug("Initial email sent successfully!")
-            except Exception as e:
-                logger.error(f"Failed to send initial email: {e}")
-                return jsonify({"message": "Reservation created but failed to send email", "error": str(e)})
-
+                We will notify you once your reservation is confirmed.
+                """
+            )
             return jsonify({"message": "Reservation created and confirmation email sent", "reservation": reservation})
         else:
             return jsonify({"message": "Reservation created but failed to send Telegram message", "reservation": reservation})
@@ -138,27 +147,20 @@ def confirm_reservation():
         reservation["status"] = "Confirmed"
 
         # Send confirmation email
-        try:
-            msg = Message(
-                subject="Reservation Confirmed",
-                sender=app.config['MAIL_USERNAME'],
-                recipients=[reservation['email']],
-                body=f"""
-                Your reservation has been confirmed, {reservation['name']}!
-                Date: {reservation['date']}
-                Time: {reservation['time']}
-                Diners: {reservation['diners']}
-                Seating: {reservation['seating']}
-                Pickup: {reservation['pickup']}
+        send_email(
+            subject="Reservation Confirmed",
+            recipient=reservation['email'],
+            body=f"""
+            Your reservation has been confirmed, {reservation['name']}!
+            Date: {reservation['date']}
+            Time: {reservation['time']}
+            Diners: {reservation['diners']}
+            Seating: {reservation['seating']}
+            Pickup: {reservation['pickup']}
 
-                We look forward to seeing you!
-                """
-            )
-            mail.send(msg)
-            logger.debug("Confirmation email sent successfully!")
-        except Exception as e:
-            logger.error(f"Failed to send confirmation email: {e}")
-
+            We look forward to seeing you!
+            """
+        )
         return jsonify({"message": "Reservation confirmed and email sent", "reservation": reservation})
     except Exception as e:
         logger.error(f"Error in confirm_reservation: {e}")
