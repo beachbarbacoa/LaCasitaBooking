@@ -14,12 +14,19 @@ CORS(app)  # Allow requests from all origins
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# Email configuration for SendGrid
+app.config['MAIL_SERVER'] = 'smtp.sendgrid.net'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')  # Should be 'apikey'
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')  # Your SendGrid API key
+
 # In-memory "database" (using a list)
 reservations = []
 
 # Telegram setup
-telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN', '7619634541:AAHoWrA378nyG8--LAE7LMwtlKcsozRyFTI')  # Replace with your bot token
-telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID', '6864600775')  # Replace with your chat ID
+telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN')  # Replace with your bot token
+telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')  # Replace with your chat ID
 
 # Helper function to send Telegram message
 def send_telegram_message(message):
@@ -46,8 +53,12 @@ def send_email(subject, recipient, body):
         # Email configuration
         sender_email = os.getenv('MAIL_USERNAME')
         sender_password = os.getenv('MAIL_PASSWORD')
-        smtp_server = 'smtp.gmail.com'
-        smtp_port = 587
+        smtp_server = app.config['MAIL_SERVER']
+        smtp_port = app.config['MAIL_PORT']
+
+        logger.debug(f"Attempting to send email to {recipient} using SendGrid SMTP...")
+        logger.debug(f"SMTP Server: {smtp_server}, Port: {smtp_port}")
+        logger.debug(f"Sender Email: {sender_email}")
 
         # Create the email
         msg = MIMEMultipart()
@@ -58,12 +69,17 @@ def send_email(subject, recipient, body):
 
         # Send the email
         with smtplib.SMTP(smtp_server, smtp_port) as server:
+            logger.debug("Starting TLS...")
             server.starttls()
+            logger.debug("Logging into SMTP server...")
             server.login(sender_email, sender_password)
+            logger.debug("Sending email...")
             server.sendmail(sender_email, recipient, msg.as_string())
         logger.debug("Email sent successfully!")
+        return True
     except Exception as e:
         logger.error(f"Failed to send email: {e}")
+        return False
 
 # Routes
 @app.route("/")
@@ -111,7 +127,7 @@ def create_reservation():
 
         if send_telegram_message(message):
             # Send initial email confirmation
-            send_email(
+            email_sent = send_email(
                 subject="Reservation Request Received",
                 recipient=reservation['email'],
                 body=f"""
@@ -125,7 +141,10 @@ def create_reservation():
                 We will notify you once your reservation is confirmed.
                 """
             )
-            return jsonify({"message": "Reservation created and confirmation email sent", "reservation": reservation})
+            if email_sent:
+                return jsonify({"message": "Reservation created and confirmation email sent", "reservation": reservation})
+            else:
+                return jsonify({"message": "Reservation created but failed to send email", "reservation": reservation})
         else:
             return jsonify({"message": "Reservation created but failed to send Telegram message", "reservation": reservation})
     except Exception as e:
@@ -147,7 +166,7 @@ def confirm_reservation():
         reservation["status"] = "Confirmed"
 
         # Send confirmation email
-        send_email(
+        email_sent = send_email(
             subject="Reservation Confirmed",
             recipient=reservation['email'],
             body=f"""
@@ -161,7 +180,10 @@ def confirm_reservation():
             We look forward to seeing you!
             """
         )
-        return jsonify({"message": "Reservation confirmed and email sent", "reservation": reservation})
+        if email_sent:
+            return jsonify({"message": "Reservation confirmed and email sent", "reservation": reservation})
+        else:
+            return jsonify({"message": "Reservation confirmed but failed to send email", "reservation": reservation})
     except Exception as e:
         logger.error(f"Error in confirm_reservation: {e}")
         abort(500, "Internal server error")
