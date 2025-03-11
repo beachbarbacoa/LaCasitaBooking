@@ -11,7 +11,7 @@ const App = () => {
   const [seating, setSeating] = useState('inside');
   const [pickup, setPickup] = useState('no');
 
-  const backendUrl = "https://lacasitabooking.onrender.com"; // Updated to your Render backend URL
+  const backendUrl = "https://la-casita-backend.onrender.com"; // Updated to your Render backend URL
 
   // Date Picker Logic
   const today = new Date();
@@ -54,7 +54,7 @@ const App = () => {
       email,
       phone,
       date,
-      time: `${time.hour}:${String(time.minute).padStart(2, '0')} ${time.ampm}`, // Fixed time formatting
+      time: `${time.hour}:${time.minute} ${time.ampm}`,
       diners,
       seating,
       pickup,
