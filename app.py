@@ -86,6 +86,18 @@ def send_email(subject, recipient, body):
 def home():
     return "Welcome to the Reservation System!"
 
+@app.route("/test-email")
+def test_email():
+    try:
+        send_email(
+            subject="Test Email",
+            recipient="colincorreia@me.com",  # Replace with your email
+            body="This is a test email."
+        )
+        return "Test email sent successfully!"
+    except Exception as e:
+        return f"Failed to send test email: {e}"
+
 @app.route("/reservations", methods=["POST"])
 def create_reservation():
     try:
