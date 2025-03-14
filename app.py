@@ -14,9 +14,9 @@ CORS(app)  # Allow requests from all origins
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Email configuration for SendGrid
+# Email configuration for SendGrid SMTP Relay
 app.config['MAIL_SERVER'] = 'smtp.sendgrid.net'
-app.config['MAIL_PORT'] = 2525  # Use port 2525 for TLS
+app.config['MAIL_PORT'] = 587  # Use port 587 for TLS (or 2525 if 587 is blocked)
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')  # Should be 'apikey'
 app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')  # Your SendGrid API key
@@ -47,7 +47,7 @@ def send_telegram_message(message):
         logger.error(f"Failed to send Telegram message: {e}")  # Log any exceptions
         return False
 
-# Helper function to send email using smtplib
+# Helper function to send email using SendGrid SMTP Relay
 def send_email(subject, recipient, body):
     try:
         # Email configuration
