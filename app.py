@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Email configuration for SendGrid
 app.config['MAIL_SERVER'] = 'smtp.sendgrid.net'
-app.config['MAIL_PORT'] = 2525  # Use port 2525 instead of 587
+app.config['MAIL_PORT'] = 2525  # Use port 2525 for TLS
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')  # Should be 'apikey'
 app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')  # Your SendGrid API key
@@ -77,8 +77,11 @@ def send_email(subject, recipient, body):
             server.sendmail(sender_email, recipient, msg.as_string())
         logger.debug("Email sent successfully!")
         return True
+    except smtplib.SMTPException as e:
+        logger.error(f"SMTP error occurred: {e}")
+        return False
     except Exception as e:
-        logger.error(f"Failed to send email: {e}")
+        logger.error(f"Unexpected error occurred: {e}")
         return False
 
 # Routes
