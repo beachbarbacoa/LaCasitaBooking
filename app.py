@@ -14,7 +14,7 @@ CORS(app)  # Allow requests from all origins
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Email configuration for SendGrid SMTP Relay
+# Email configuration for SendGrid
 app.config['MAIL_SERVER'] = 'smtp.sendgrid.net'
 app.config['MAIL_PORT'] = 587  # Use port 587 for TLS (or 2525 if 587 is blocked)
 app.config['MAIL_USE_TLS'] = True
@@ -51,18 +51,19 @@ def send_telegram_message(message):
 def send_email(subject, recipient, body):
     try:
         # Email configuration
-        sender_email = os.getenv('MAIL_USERNAME')
-        sender_password = os.getenv('MAIL_PASSWORD')
+        sender_email = os.getenv('MAIL_USERNAME')  # This should still be 'apikey'
+        sender_password = os.getenv('MAIL_PASSWORD')  # Your SendGrid API key
         smtp_server = app.config['MAIL_SERVER']
         smtp_port = app.config['MAIL_PORT']
+        from_email = os.getenv('SENDER_EMAIL')  # Get the sender email from environment variables
 
         logger.debug(f"Attempting to send email to {recipient} using SendGrid SMTP...")
         logger.debug(f"SMTP Server: {smtp_server}, Port: {smtp_port}")
-        logger.debug(f"Sender Email: {sender_email}")
+        logger.debug(f"Sender Email: {from_email}")
 
         # Create the email
         msg = MIMEMultipart()
-        msg['From'] = "noreply@globalpromotional.science"
+        msg['From'] = from_email  # Use the environment variable
         msg['To'] = recipient
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
@@ -74,7 +75,7 @@ def send_email(subject, recipient, body):
             logger.debug("Logging into SMTP server...")
             server.login(sender_email, sender_password)
             logger.debug("Sending email...")
-            server.sendmail(sender_email, recipient, msg.as_string())
+            server.sendmail(from_email, recipient, msg.as_string())  # Use the environment variable
         logger.debug("Email sent successfully!")
         return True
     except smtplib.SMTPException as e:
