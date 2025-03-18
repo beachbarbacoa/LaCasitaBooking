@@ -1,12 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, ScrollView, TouchableOpacity, FlatList } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
 
 const App = () => {
-  const navigation = useNavigation();
-  const route = useRoute();
-  const reservationId = route.params?.reservationId;
-
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -16,7 +11,7 @@ const App = () => {
   const [seating, setSeating] = useState('inside');
   const [pickup, setPickup] = useState('no');
 
-  const backendUrl = "https://reservation-backend.onrender.com"; // Updated to your Render backend URL
+  const backendUrl = "https://lacasitabooking.onrender.com"; // Updated to your Render backend URL
 
   // Date Picker Logic
   const today = new Date();
@@ -44,32 +39,15 @@ const App = () => {
     }
   };
 
-  // Time Picker Logic
+  // Time Selection Logic
   const handleTimeChange = (type, value) => {
     setTime((prev) => ({ ...prev, [type]: value }));
   };
 
-  const toggleAMPM = () => {
-    setTime((prev) => ({ ...prev, ampm: prev.ampm === 'AM' ? 'PM' : 'AM' }));
-  };
-
-  // Fetch reservation details if reservationId is present
-  useEffect(() => {
-    if (reservationId) {
-      fetch(`${backendUrl}/reservations/${reservationId}`)
-        .then((response) => response.json())
-        .then((data) => {
-          setName(data.name);
-          setEmail(data.email);
-          setPhone(data.phone);
-          setDate(data.date);
-          setTime(data.time);
-          setDiners(data.diners);
-          setSeating(data.seating);
-          setPickup(data.pickup);
-        });
-    }
-  }, [reservationId]);
+  // Data for FlatList
+  const hours = Array.from({ length: 12 }, (_, i) => ({ id: i + 1, label: `${i + 1}` }));
+  const minutes = Array.from({ length: 60 }, (_, i) => ({ id: i, label: i.toString().padStart(2, '0') }));
+  const ampm = [{ id: 1, label: 'AM' }, { id: 2, label: 'PM' }];
 
   const handleSubmit = async () => {
     const reservation = {
@@ -147,7 +125,7 @@ const App = () => {
       <View style={styles.timePicker}>
         <FlatList
           horizontal
-          data={Array.from({ length: 12 }, (_, i) => ({ id: i + 1, label: `${i + 1}` }))}
+          data={hours}
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
             <TouchableOpacity
@@ -161,7 +139,7 @@ const App = () => {
         <Text>:</Text>
         <FlatList
           horizontal
-          data={Array.from({ length: 60 }, (_, i) => ({ id: i, label: i.toString().padStart(2, '0') }))}
+          data={minutes}
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
             <TouchableOpacity
@@ -174,7 +152,7 @@ const App = () => {
         />
         <FlatList
           horizontal
-          data={[{ id: 1, label: 'AM' }, { id: 2, label: 'PM' }]}
+          data={ampm}
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
             <TouchableOpacity
