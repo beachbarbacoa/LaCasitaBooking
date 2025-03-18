@@ -62,7 +62,7 @@ def send_email(subject, recipient, body):
 
         # Create the email
         msg = MIMEMultipart()
-        msg['From'] = sender_email
+        msg['From'] = "noreply@globalpromotional.science"
         msg['To'] = recipient
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
