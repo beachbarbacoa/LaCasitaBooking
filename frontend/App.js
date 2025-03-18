@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Button, Picker, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, TextInput, Button, StyleSheet, ScrollView, TouchableOpacity, FlatList } from 'react-native';
 
 const App = () => {
   const [name, setName] = useState('');
@@ -11,7 +11,7 @@ const App = () => {
   const [seating, setSeating] = useState('inside');
   const [pickup, setPickup] = useState('no');
 
-  const backendUrl = "https://la-casita-backend.onrender.com"; // Updated to your Render backend URL
+  const backendUrl = "https://lacasitabooking.onrender.com"; // Updated to your Render backend URL
 
   // Date Picker Logic
   const today = new Date();
@@ -39,14 +39,15 @@ const App = () => {
     }
   };
 
-  // Time Picker Logic
+  // Time Selection Logic
   const handleTimeChange = (type, value) => {
     setTime((prev) => ({ ...prev, [type]: value }));
   };
 
-  const toggleAMPM = () => {
-    setTime((prev) => ({ ...prev, ampm: prev.ampm === 'AM' ? 'PM' : 'AM' }));
-  };
+  // Data for FlatList
+  const hours = Array.from({ length: 12 }, (_, i) => ({ id: i + 1, label: `${i + 1}` }));
+  const minutes = Array.from({ length: 60 }, (_, i) => ({ id: i, label: i.toString().padStart(2, '0') }));
+  const ampm = [{ id: 1, label: 'AM' }, { id: 2, label: 'PM' }];
 
   const handleSubmit = async () => {
     const reservation = {
@@ -54,7 +55,7 @@ const App = () => {
       email,
       phone,
       date,
-      time: `${time.hour}:${time.minute} ${time.ampm}`,
+      time: `${time.hour}:${String(time.minute).padStart(2, '0')} ${time.ampm}`, // Fixed time formatting
       diners,
       seating,
       pickup,
@@ -122,55 +123,92 @@ const App = () => {
 
       <Text>Time:</Text>
       <View style={styles.timePicker}>
-        <View style={styles.timeSection}>
-          <Picker
-            selectedValue={time.hour}
-            onValueChange={(itemValue) => handleTimeChange('hour', itemValue)}
-            style={styles.picker}
-          >
-            {[...Array(12).keys()].map((i) => (
-              <Picker.Item key={i + 1} label={`${i + 1}`} value={i + 1} />
-            ))}
-          </Picker>
-          <Text>:</Text>
-          <Picker
-            selectedValue={time.minute}
-            onValueChange={(itemValue) => handleTimeChange('minute', itemValue)}
-            style={styles.picker}
-          >
-            {[...Array(60).keys()].map((i) => (
-              <Picker.Item key={i} label={`${i.toString().padStart(2, '0')}`} value={i} />
-            ))}
-          </Picker>
-          <Picker
-            selectedValue={time.ampm}
-            onValueChange={(itemValue) => handleTimeChange('ampm', itemValue)}
-            style={styles.picker}
-          >
-            <Picker.Item label="AM" value="AM" />
-            <Picker.Item label="PM" value="PM" />
-          </Picker>
-        </View>
+        <FlatList
+          horizontal
+          data={hours}
+          keyExtractor={(item) => item.id.toString()}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[styles.timeButton, time.hour === item.id && styles.selectedTime]}
+              onPress={() => handleTimeChange('hour', item.id)}
+            >
+              <Text>{item.label}</Text>
+            </TouchableOpacity>
+          )}
+        />
+        <Text>:</Text>
+        <FlatList
+          horizontal
+          data={minutes}
+          keyExtractor={(item) => item.id.toString()}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[styles.timeButton, time.minute === item.id && styles.selectedTime]}
+              onPress={() => handleTimeChange('minute', item.id)}
+            >
+              <Text>{item.label}</Text>
+            </TouchableOpacity>
+          )}
+        />
+        <FlatList
+          horizontal
+          data={ampm}
+          keyExtractor={(item) => item.id.toString()}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[styles.timeButton, time.ampm === item.label && styles.selectedTime]}
+              onPress={() => handleTimeChange('ampm', item.label)}
+            >
+              <Text>{item.label}</Text>
+            </TouchableOpacity>
+          )}
+        />
       </View>
 
       <Text>Number of Diners:</Text>
-      <Picker selectedValue={diners} onValueChange={setDiners}>
-        {[...Array(10).keys()].map((i) => (
-          <Picker.Item key={i + 1} label={`${i + 1}`} value={`${i + 1}`} />
-        ))}
-      </Picker>
+      <FlatList
+        horizontal
+        data={Array.from({ length: 10 }, (_, i) => ({ id: i + 1, label: `${i + 1}` }))}
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={[styles.timeButton, diners === item.label && styles.selectedTime]}
+            onPress={() => setDiners(item.label)}
+          >
+            <Text>{item.label}</Text>
+          </TouchableOpacity>
+        )}
+      />
 
       <Text>Seating Preference:</Text>
-      <Picker selectedValue={seating} onValueChange={setSeating}>
-        <Picker.Item label="Inside" value="inside" />
-        <Picker.Item label="Outside" value="outside" />
-      </Picker>
+      <FlatList
+        horizontal
+        data={[{ id: 1, label: 'Inside' }, { id: 2, label: 'Outside' }]}
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={[styles.timeButton, seating === item.label.toLowerCase() && styles.selectedTime]}
+            onPress={() => setSeating(item.label.toLowerCase())}
+          >
+            <Text>{item.label}</Text>
+          </TouchableOpacity>
+        )}
+      />
 
       <Text>Require Pickup and Drop-off?</Text>
-      <Picker selectedValue={pickup} onValueChange={setPickup}>
-        <Picker.Item label="No" value="no" />
-        <Picker.Item label="Yes" value="yes" />
-      </Picker>
+      <FlatList
+        horizontal
+        data={[{ id: 1, label: 'No' }, { id: 2, label: 'Yes' }]}
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={[styles.timeButton, pickup === item.label.toLowerCase() && styles.selectedTime]}
+            onPress={() => setPickup(item.label.toLowerCase())}
+          >
+            <Text>{item.label}</Text>
+          </TouchableOpacity>
+        )}
+      />
 
       <Button title="Submit Reservation" onPress={handleSubmit} />
     </ScrollView>
@@ -226,15 +264,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
   },
-  timeSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    flex: 1,
+  timeButton: {
+    padding: 10,
+    margin: 5,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 5,
   },
-  picker: {
-    width: 100,
-    height: 150,
+  selectedTime: {
+    backgroundColor: '#ddd',
   },
 });
 
