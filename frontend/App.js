@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, ScrollView, TouchableOpacity, FlatList } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
 
-const App = () => {
-  const navigation = useNavigation();
-  const route = useRoute();
+// Create a stack navigator
+const Stack = createStackNavigator();
+
+// Main Reservation Form Component
+const ReservationForm = ({ navigation, route }) => {
   const reservationId = route.params?.reservationId;
 
   const [name, setName] = useState('');
@@ -77,7 +80,7 @@ const App = () => {
       email,
       phone,
       date,
-      time: `${time.hour}:${String(time.minute).padStart(2, '0')} ${time.ampm}`, // Fixed time formatting
+      time: `${time.hour}:${String(time.minute).padStart(2, '0')} ${time.ampm}`,
       diners,
       seating,
       pickup,
@@ -234,6 +237,21 @@ const App = () => {
 
       <Button title="Submit Reservation" onPress={handleSubmit} />
     </ScrollView>
+  );
+};
+
+// App Component with Navigation
+const App = () => {
+  return (
+    <NavigationContainer>
+      <Stack.Navigator>
+        <Stack.Screen
+          name="ReservationForm"
+          component={ReservationForm}
+          options={{ title: 'Make a Reservation' }}
+        />
+      </Stack.Navigator>
+    </NavigationContainer>
   );
 };
 
