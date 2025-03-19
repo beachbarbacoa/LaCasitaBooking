@@ -19,7 +19,7 @@ const ReservationForm = ({ navigation, route }) => {
   const [seating, setSeating] = useState('inside');
   const [pickup, setPickup] = useState('no');
 
-  const backendUrl = "https://reservation-backend.onrender.com"; // Updated to your Render backend URL
+  const backendUrl = "https://lacasitabooking.onrender.com"; // Updated to your Render backend URL
 
   // Date Picker Logic
   const today = new Date();
@@ -93,18 +93,27 @@ const ReservationForm = ({ navigation, route }) => {
         body: JSON.stringify(reservation),
       });
 
+      // Check if the response is OK (status code 200-299)
       if (!response.ok) {
-        const errorData = await response.json();
+        // Try to parse the error response as JSON
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (error) {
+          // If the response isn't JSON, use the status text
+          errorData = { message: response.statusText };
+        }
         console.error("Backend error:", errorData);
         alert(`Failed to submit reservation: ${errorData.message}`);
         return;
       }
 
+      // Parse the successful response as JSON
       const data = await response.json();
-      alert(data.message);
+      alert(data.message); // Show success message
     } catch (error) {
       console.error("Frontend error:", error);
-      alert('Failed to submit reservation');
+      alert('Failed to submit reservation. Please try again later.');
     }
   };
 
