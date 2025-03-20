@@ -30,7 +30,7 @@ const Reservation = sequelize.define('Reservation', {
 
 // Sync the database
 sequelize.sync()
-  .then(() => console.log('Database synced'))
+  .then(() => console.log('Database synced successfully'))
   .catch((err) => console.error('Failed to sync database:', err));
 
 // SendGrid setup
@@ -122,6 +122,17 @@ app.post('/reservations', async (req, res) => {
   } catch (error) {
     console.error('Error saving reservation:', error);
     res.status(500).json({ message: 'Failed to submit reservation', error: error.message });
+  }
+});
+
+// Endpoint to list all reservations
+app.get('/reservations', async (req, res) => {
+  try {
+    const reservations = await Reservation.findAll();
+    res.status(200).json(reservations);
+  } catch (error) {
+    console.error('Error fetching reservations:', error);
+    res.status(500).json({ message: 'Failed to fetch reservations', error: error.message });
   }
 });
 
