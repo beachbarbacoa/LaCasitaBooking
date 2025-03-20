@@ -98,7 +98,11 @@ function sendReservationToOperator(chatId, reservation) {
     },
   };
 
-  bot.sendMessage(chatId, message, options);
+  console.log('Sending Telegram message with options:', options); // Log the options
+
+  bot.sendMessage(chatId, message, options)
+    .then(() => console.log('Telegram message sent successfully'))
+    .catch((error) => console.error('Failed to send Telegram message:', error));
 }
 
 // Handle new reservations
