@@ -6,7 +6,7 @@ const TelegramBot = require('node-telegram-bot-api');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const bot = new TelegramBot('YOUR_TELEGRAM_BOT_TOKEN', { polling: true });
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 
 // Initialize Sequelize with SQLite
 const sequelize = new Sequelize({
@@ -98,7 +98,7 @@ function sendReservationToOperator(chatId, reservation) {
     },
   };
 
-  console.log('Sending Telegram message with options:', options); // Log the options
+  console.log('Sending Telegram message with options:', JSON.stringify(options, null, 2)); // Log the options
 
   bot.sendMessage(chatId, message, options)
     .then(() => console.log('Telegram message sent successfully'))
@@ -115,7 +115,7 @@ app.post('/reservations', async (req, res) => {
     console.log('Reservation saved:', savedReservation);
 
     // Send the reservation to the restaurant/tour operator via Telegram
-    const operatorChatId = 'RESTAURANT_OR_TOUR_OPERATOR_CHAT_ID'; // Replace with the actual chat ID
+    const operatorChatId = process.env.TELEGRAM_CHAT_ID; // Replace with the actual chat ID
     sendReservationToOperator(operatorChatId, savedReservation);
 
     res.status(201).json({ message: 'Reservation request sent successfully!', reservation: savedReservation });
