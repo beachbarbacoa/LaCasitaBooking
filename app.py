@@ -112,6 +112,73 @@ def send_email(subject, recipient, body):
         logger.error(f"Unexpected error occurred: {e}")
         return False
 
+# Route to handle Telegram callback queries
+@app.route("/telegram-callback", methods=["POST"])
+def telegram_callback():
+    try:
+        data = request.json
+        callback_query = data.get("callback_query")
+        if not callback_query:
+            abort(400, "No callback query found")
+
+        callback_data = callback_query.get("data")
+        reservation_id = int(callback_data.split("_")[1])
+        reservation = Reservation.query.get(reservation_id)
+
+        if not reservation:
+            abort(404, "Reservation not found")
+
+        if callback_data.startswith("accept"):
+            # Handle acceptance
+            reservation.status = "Confirmed"
+            db.session.commit()
+
+            # Send confirmation email
+            send_email(
+                subject="Reservation Confirmed",
+                recipient=reservation.email,
+                body=f"""
+                Your reservation has been confirmed, {reservation.name}!
+                Date: {reservation.date}
+                Time: {reservation.time}
+                Diners: {reservation.diners}
+                Seating: {reservation.seating}
+                Pickup: {reservation.pickup}
+
+                We look forward to seeing you!
+                """
+            )
+            return jsonify({"message": "Reservation confirmed and email sent"})
+
+        elif callback_data.startswith("deny"):
+            # Handle denial
+            reservation.status = "Denied"
+            db.session.commit()
+
+            # Send denial email
+            send_email(
+                subject="Reservation Denied",
+                recipient=reservation.email,
+                body=f"""
+                We regret to inform you that your reservation has been denied.
+                Date: {reservation.date}
+                Time: {reservation.time}
+                Diners: {reservation.diners}
+                Seating: {reservation.seating}
+                Pickup: {reservation.pickup}
+
+                Please try booking a different time.
+                """
+            )
+            return jsonify({"message": "Reservation denied and email sent"})
+
+        else:
+            abort(400, "Invalid callback data")
+
+    except Exception as e:
+        logger.error(f"Error in telegram_callback: {e}")
+        abort(500, "Internal server error")
+
 # Routes
 @app.route("/")
 def home():
@@ -197,82 +264,6 @@ def create_reservation():
     except Exception as e:
         logger.error(f"Error in create_reservation: {e}")
         abort(500, "Internal server error")
-
-@app.route("/confirm-reservation", methods=["POST"])
-def confirm_reservation():
-    try:
-        data = request.json
-        reservation_id = data.get("reservation_id")
-
-        reservation = Reservation.query.get(reservation_id)
-        if not reservation:
-            abort(404, "Reservation not found")
-
-        reservation.status = "Confirmed"
-        db.session.commit()
-
-        email_sent = send_email(
-            subject="Reservation Confirmed",
-            recipient=reservation.email,
-            body=f"""
-            Your reservation has been confirmed, {reservation.name}!
-            Date: {reservation.date}
-            Time: {reservation.time}
-            Diners: {reservation.diners}
-            Seating: {reservation.seating}
-            Pickup: {reservation.pickup}
-
-            We look forward to seeing you!
-            """
-        )
-        if email_sent:
-            return jsonify({"message": "Reservation confirmed and email sent", "reservation": {
-                "id": reservation.id,
-                "name": reservation.name,
-                "email": reservation.email,
-                "phone": reservation.phone,
-                "time": reservation.time,
-                "date": reservation.date,
-                "diners": reservation.diners,
-                "seating": reservation.seating,
-                "pickup": reservation.pickup,
-                "status": reservation.status
-            }})
-        else:
-            return jsonify({"message": "Reservation confirmed but failed to send email", "reservation": {
-                "id": reservation.id,
-                "name": reservation.name,
-                "email": reservation.email,
-                "phone": reservation.phone,
-                "time": reservation.time,
-                "date": reservation.date,
-                "diners": reservation.diners,
-                "seating": reservation.seating,
-                "pickup": reservation.pickup,
-                "status": reservation.status
-            }})
-    except Exception as e:
-        logger.error(f"Error in confirm_reservation: {e}")
-        abort(500, "Internal server error")
-
-@app.route("/reservations", methods=["GET"])
-def get_reservations():
-    reservations = Reservation.query.all()
-    return jsonify({"reservations": [
-        {
-            "id": reservation.id,
-            "name": reservation.name,
-            "email": reservation.email,
-            "phone": reservation.phone,
-            "time": reservation.time,
-            "date": reservation.date,
-            "diners": reservation.diners,
-            "seating": reservation.seating,
-            "pickup": reservation.pickup,
-            "status": reservation.status
-        }
-        for reservation in reservations
-    ]})
 
 # Run the server
 if __name__ == "__main__":
