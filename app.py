@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Database configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///reservations.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')  # Use PostgreSQL URL from Render
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -48,6 +48,9 @@ app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')  # Your SendGrid API ke
 # Telegram setup
 telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN')  # Replace with your bot token
 telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')  # Replace with your chat ID
+
+# Global variable to track pending denials
+pending_denial = None
 
 # Helper function to send Telegram message with inline buttons
 def send_telegram_message_with_buttons(reservation):
@@ -169,7 +172,6 @@ def telegram_callback():
             response.raise_for_status()
 
             # Store the reservation ID in the operator's session
-            # (This is a simplified approach; in a real app, you'd use a proper session management system)
             global pending_denial
             pending_denial = reservation_id
 
@@ -186,27 +188,32 @@ def telegram_callback():
 @app.route("/telegram-reply", methods=["POST"])
 def telegram_reply():
     try:
+        logger.debug("Received reply data: %s", request.json)  # Log the incoming request
         data = request.json
         message = data.get("message")
         if not message:
+            logger.error("No message found in request")
             abort(400, "No message found")
 
         # Check if this is a reply to a denial prompt
         global pending_denial
         if not pending_denial:
+            logger.error("No pending denial found")
             abort(400, "No pending denial found")
 
         # Get the reservation
         reservation = Reservation.query.get(pending_denial)
         if not reservation:
+            logger.error("Reservation not found for ID: %s", pending_denial)
             abort(404, "Reservation not found")
 
         # Update the reservation with the denial reason
         reservation.denial_reason = message.get("text")
         db.session.commit()
+        logger.debug("Denial reason updated for reservation ID: %s", pending_denial)
 
         # Send denial email to the guest
-        send_email(
+        email_sent = send_email(
             subject="Reservation Denied",
             recipient=reservation.email,
             body=f"""
@@ -222,6 +229,10 @@ def telegram_reply():
             Please try booking a different time.
             """
         )
+        if email_sent:
+            logger.debug("Denial email sent successfully")
+        else:
+            logger.error("Failed to send denial email")
 
         # Clear the pending denial
         pending_denial = None
