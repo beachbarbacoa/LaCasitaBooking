@@ -5,8 +5,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 
-// Test endpoint for Telegram bot
+// Log when the /test-telegram route is registered
 app.get('/test-telegram', (req, res) => {
+  console.log('/test-telegram route accessed'); // Log when the route is accessed
   const chatId = process.env.TELEGRAM_CHAT_ID; // Use the chat ID from Render environment variables
   const message = 'Test message with inline buttons';
   const options = {
