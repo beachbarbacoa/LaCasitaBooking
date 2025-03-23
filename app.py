@@ -32,6 +32,7 @@ class Reservation(db.Model):
     seating = db.Column(db.String(20), nullable=False)
     pickup = db.Column(db.String(10), nullable=False)
     status = db.Column(db.String(20), default="Pending")
+    denial_reason = db.Column(db.String(200))  # New field for denial reason
 
 # Create the database and tables
 with app.app_context():
@@ -155,28 +156,80 @@ def telegram_callback():
             reservation.status = "Denied"
             db.session.commit()
 
-            # Send denial email
-            send_email(
-                subject="Reservation Denied",
-                recipient=reservation.email,
-                body=f"""
-                We regret to inform you that your reservation has been denied.
-                Date: {reservation.date}
-                Time: {reservation.time}
-                Diners: {reservation.diners}
-                Seating: {reservation.seating}
-                Pickup: {reservation.pickup}
+            # Prompt the operator for a reason
+            url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+            payload = {
+                "chat_id": telegram_chat_id,
+                "text": "Please provide a reason for denying this reservation:",
+                "reply_markup": {
+                    "force_reply": True  # Force the operator to reply
+                }
+            }
+            response = requests.post(url, json=payload)
+            response.raise_for_status()
 
-                Please try booking a different time.
-                """
-            )
-            return jsonify({"message": "Reservation denied and email sent"})
+            # Store the reservation ID in the operator's session
+            # (This is a simplified approach; in a real app, you'd use a proper session management system)
+            global pending_denial
+            pending_denial = reservation_id
+
+            return jsonify({"message": "Prompted operator for denial reason"})
 
         else:
             abort(400, "Invalid callback data")
 
     except Exception as e:
         logger.error(f"Error in telegram_callback: {e}")
+        abort(500, "Internal server error")
+
+# Route to handle operator's reply with denial reason
+@app.route("/telegram-reply", methods=["POST"])
+def telegram_reply():
+    try:
+        data = request.json
+        message = data.get("message")
+        if not message:
+            abort(400, "No message found")
+
+        # Check if this is a reply to a denial prompt
+        global pending_denial
+        if not pending_denial:
+            abort(400, "No pending denial found")
+
+        # Get the reservation
+        reservation = Reservation.query.get(pending_denial)
+        if not reservation:
+            abort(404, "Reservation not found")
+
+        # Update the reservation with the denial reason
+        reservation.denial_reason = message.get("text")
+        db.session.commit()
+
+        # Send denial email to the guest
+        send_email(
+            subject="Reservation Denied",
+            recipient=reservation.email,
+            body=f"""
+            We regret to inform you that your reservation has been denied.
+            Reason: {reservation.denial_reason}
+
+            Date: {reservation.date}
+            Time: {reservation.time}
+            Diners: {reservation.diners}
+            Seating: {reservation.seating}
+            Pickup: {reservation.pickup}
+
+            Please try booking a different time.
+            """
+        )
+
+        # Clear the pending denial
+        pending_denial = None
+
+        return jsonify({"message": "Denial reason received and email sent"})
+
+    except Exception as e:
+        logger.error(f"Error in telegram_reply: {e}")
         abort(500, "Internal server error")
 
 # Routes
