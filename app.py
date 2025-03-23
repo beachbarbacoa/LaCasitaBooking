@@ -48,54 +48,61 @@ app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')  # Your SendGrid API ke
 telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN')  # Replace with your bot token
 telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')  # Replace with your chat ID
 
-# Helper function to send Telegram message
-def send_telegram_message(message):
+# Helper function to send Telegram message with inline buttons
+def send_telegram_message_with_buttons(reservation):
     try:
-        logger.debug("Sending Telegram message...")  # Log when sending a message
-        logger.debug(f"Message content: {message}")  # Log the message content
+        message = (
+            f"New Reservation:\n"
+            f"Name: {reservation.name}\n"
+            f"Email: {reservation.email}\n"
+            f"Phone: {reservation.phone}\n"
+            f"Date: {reservation.date}\n"
+            f"Time: {reservation.time}\n"
+            f"Diners: {reservation.diners}\n"
+            f"Seating: {reservation.seating}\n"
+            f"Pickup: {reservation.pickup}"
+        )
 
         url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
         payload = {
             "chat_id": telegram_chat_id,
-            "text": message
+            "text": message,
+            "reply_markup": {
+                "inline_keyboard": [
+                    [
+                        {"text": "Accept", "callback_data": f"accept_{reservation.id}"},
+                        {"text": "Deny", "callback_data": f"deny_{reservation.id}"}
+                    ]
+                ]
+            }
         }
-        response = requests.post(url, json=payload)  # Fixed missing parenthesis
-        response.raise_for_status()  # Raise an error for bad status codes
-        logger.debug("Message sent successfully!")  # Log success
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        logger.debug("Telegram message with buttons sent successfully!")
         return True
     except Exception as e:
-        logger.error(f"Failed to send Telegram message: {e}")  # Log any exceptions
+        logger.error(f"Failed to send Telegram message with buttons: {e}")
         return False
 
 # Helper function to send email using SendGrid SMTP Relay
 def send_email(subject, recipient, body):
     try:
-        # Email configuration
-        sender_email = os.getenv('MAIL_USERNAME')  # This should still be 'apikey'
-        sender_password = os.getenv('MAIL_PASSWORD')  # Your SendGrid API key
+        sender_email = os.getenv('MAIL_USERNAME')
+        sender_password = os.getenv('MAIL_PASSWORD')
         smtp_server = app.config['MAIL_SERVER']
         smtp_port = app.config['MAIL_PORT']
-        from_email = os.getenv('SENDER_EMAIL')  # Get the sender email from environment variables
+        from_email = os.getenv('SENDER_EMAIL')
 
-        logger.debug(f"Attempting to send email to {recipient} using SendGrid SMTP...")
-        logger.debug(f"SMTP Server: {smtp_server}, Port: {smtp_port}")
-        logger.debug(f"Sender Email: {from_email}")
-
-        # Create the email
         msg = MIMEMultipart()
-        msg['From'] = from_email  # Use the environment variable
+        msg['From'] = from_email
         msg['To'] = recipient
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
 
-        # Send the email
         with smtplib.SMTP(smtp_server, smtp_port) as server:
-            logger.debug("Starting TLS...")
             server.starttls()
-            logger.debug("Logging into SMTP server...")
             server.login(sender_email, sender_password)
-            logger.debug("Sending email...")
-            server.sendmail(from_email, recipient, msg.as_string())  # Use the environment variable
+            server.sendmail(from_email, recipient, msg.as_string())
         logger.debug("Email sent successfully!")
         return True
     except smtplib.SMTPException as e:
@@ -110,30 +117,14 @@ def send_email(subject, recipient, body):
 def home():
     return "Welcome to the Reservation System!"
 
-@app.route("/test-email")
-def test_email():
-    try:
-        send_email(
-            subject="Test Email",
-            recipient="colincorreia@me.com",  # Replace with your email
-            body="This is a test email."
-        )
-        return "Test email sent successfully!"
-    except Exception as e:
-        return f"Failed to send test email: {e}"
-
 @app.route("/reservations", methods=["POST"])
 def create_reservation():
     try:
-        logger.debug("Request received at /reservations")  # Log when the endpoint is hit
         data = request.json
-        logger.debug(f"Received data: {data}")  # Log the received data
-
         required_fields = ["name", "email", "phone", "time", "date", "diners", "seating", "pickup"]
         if not all(field in data for field in required_fields):
             abort(400, "Missing required fields")
 
-        # Create a new reservation
         reservation = Reservation(
             name=data["name"],
             email=data["email"],
@@ -146,25 +137,10 @@ def create_reservation():
             status="Pending"
         )
 
-        # Add the reservation to the database
         db.session.add(reservation)
         db.session.commit()
 
-        # Send Telegram message
-        message = (
-            f"New Reservation:\n"
-            f"Name: {reservation.name}\n"
-            f"Email: {reservation.email}\n"
-            f"Phone: {reservation.phone}\n"
-            f"Date: {reservation.date}\n"
-            f"Time: {reservation.time}\n"
-            f"Diners: {reservation.diners}\n"
-            f"Seating: {reservation.seating}\n"
-            f"Pickup: {reservation.pickup}"
-        )
-
-        if send_telegram_message(message):
-            # Send initial email confirmation
+        if send_telegram_message_with_buttons(reservation):
             email_sent = send_email(
                 subject="Reservation Request Received",
                 recipient=reservation.email,
@@ -219,7 +195,7 @@ def create_reservation():
                 "status": reservation.status
             }})
     except Exception as e:
-        logger.error(f"Error in create_reservation: {e}")  # Log any exceptions
+        logger.error(f"Error in create_reservation: {e}")
         abort(500, "Internal server error")
 
 @app.route("/confirm-reservation", methods=["POST"])
@@ -228,16 +204,13 @@ def confirm_reservation():
         data = request.json
         reservation_id = data.get("reservation_id")
 
-        # Find the reservation
         reservation = Reservation.query.get(reservation_id)
         if not reservation:
             abort(404, "Reservation not found")
 
-        # Update reservation status
         reservation.status = "Confirmed"
         db.session.commit()
 
-        # Send confirmation email
         email_sent = send_email(
             subject="Reservation Confirmed",
             recipient=reservation.email,
