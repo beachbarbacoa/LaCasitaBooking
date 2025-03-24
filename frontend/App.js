@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -11,7 +11,7 @@ import {
   FlatList
 } from 'react-native';
 
-const ReservationForm = () => {
+const ReservationForm = ({ route }) => {
   // State for form data
   const [formData, setFormData] = useState({
     name: '',
@@ -24,7 +24,33 @@ const ReservationForm = () => {
     pickup: 'no'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const backendUrl = "https://your-render-url.onrender.com";
+  const backendUrl = "https://lacasitabooking.onrender.com";
+
+  // Date picker logic
+  const today = new Date();
+  const [currentWeekStart, setCurrentWeekStart] = useState(new Date(today.setDate(today.getDate() - today.getDay())));
+
+  const getWeekDates = (startDate) => {
+    const dates = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(startDate);
+      date.setDate(startDate.getDate() + i);
+      dates.push(date);
+    }
+    return dates;
+  };
+
+  const handleDateChange = (newDate) => {
+    setFormData(prev => ({ ...prev, date: newDate.toISOString().split('T')[0] }));
+  };
+
+  const handleWeekChange = (direction) => {
+    const newStartDate = new Date(currentWeekStart);
+    newStartDate.setDate(newStartDate.getDate() + (direction === 'next' ? 7 : -7));
+    if (newStartDate >= new Date(new Date().setDate(new Date().getDate() - new Date().getDay()))) {
+      setCurrentWeekStart(newStartDate);
+    }
+  };
 
   // Time picker options
   const hours = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -52,6 +78,37 @@ const ReservationForm = () => {
     }));
   };
 
+  // Load existing reservation if ID is provided
+  useEffect(() => {
+    if (route?.params?.reservationId) {
+      fetch(`${backendUrl}/reservations/${route.params.reservationId}`)
+        .then(response => response.json())
+        .then(data => {
+          setFormData({
+            name: data.name,
+            email: data.email,
+            phone: data.phone,
+            date: data.date,
+            time: parseTimeString(data.time),
+            diners: data.diners.toString(),
+            seating: data.seating,
+            pickup: data.pickup
+          });
+        });
+    }
+  }, [route?.params?.reservationId]);
+
+  // Helper function to parse time string
+  const parseTimeString = (timeStr) => {
+    const [timePart, ampm] = timeStr.split(' ');
+    const [hour, minute] = timePart.split(':');
+    return {
+      hour: parseInt(hour),
+      minute: parseInt(minute),
+      ampm: ampm
+    };
+  };
+
   // Submit reservation
   const handleSubmit = async () => {
     setIsSubmitting(true);
@@ -66,6 +123,13 @@ const ReservationForm = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reservation)
       });
+
+      // First check if the response is JSON
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(text || 'Received non-JSON response');
+      }
 
       const data = await response.json();
       
@@ -116,12 +180,34 @@ const ReservationForm = () => {
       />
 
       <Text style={styles.label}>Date:</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="YYYY-MM-DD"
-        value={formData.date}
-        onChangeText={(text) => handleChange('date', text)}
-      />
+      <View style={styles.datePicker}>
+        <View style={styles.weekDates}>
+          {getWeekDates(currentWeekStart).map((dateObj, index) => (
+            <View key={index} style={styles.dateContainer}>
+              <TouchableOpacity
+                onPress={() => handleDateChange(dateObj)}
+                style={[
+                  styles.dateButton, 
+                  formData.date === dateObj.toISOString().split('T')[0] && styles.selectedDate
+                ]}
+              >
+                <Text>{dateObj.toLocaleDateString('en-US', { weekday: 'short' })}</Text>
+                <Text>{dateObj.toLocaleDateString('en-US', { day: 'numeric' })}</Text>
+              </TouchableOpacity>
+              {index === 0 && (
+                <TouchableOpacity onPress={() => handleWeekChange('prev')} style={styles.arrowButton}>
+                  <Text style={styles.arrow}>←</Text>
+                </TouchableOpacity>
+              )}
+              {index === 6 && (
+                <TouchableOpacity onPress={() => handleWeekChange('next')} style={styles.arrowButton}>
+                  <Text style={styles.arrow}>→</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ))}
+        </View>
+      </View>
 
       <Text style={styles.label}>Time:</Text>
       <View style={styles.timePicker}>
@@ -257,6 +343,40 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 5,
     marginTop: 10,
+  },
+  datePicker: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  weekDates: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    flex: 1,
+    marginHorizontal: 10,
+  },
+  dateContainer: {
+    alignItems: 'center',
+  },
+  dateButton: {
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 5,
+    alignItems: 'center',
+  },
+  selectedDate: {
+    backgroundColor: '#ddd',
+  },
+  arrowButton: {
+    padding: 10,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 5,
+    marginTop: 10,
+  },
+  arrow: {
+    fontSize: 24,
   },
   timePicker: {
     flexDirection: 'row',
