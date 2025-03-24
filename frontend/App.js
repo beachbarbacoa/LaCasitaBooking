@@ -1,261 +1,244 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, ScrollView, TouchableOpacity, FlatList } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
-import { createStackNavigator } from '@react-navigation/stack';
+import React, { useState } from 'react';
+import { 
+  View, 
+  Text, 
+  TextInput, 
+  Button, 
+  StyleSheet, 
+  Alert,
+  ScrollView,
+  TouchableOpacity,
+  FlatList
+} from 'react-native';
 
-// Create a stack navigator
-const Stack = createStackNavigator();
+const ReservationForm = () => {
+  // State for form data
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    date: '',
+    time: { hour: 7, minute: 0, ampm: 'PM' },
+    diners: '1',
+    seating: 'inside',
+    pickup: 'no'
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const backendUrl = "https://your-render-url.onrender.com";
 
-// Main Reservation Form Component
-const ReservationForm = ({ navigation, route }) => {
-  const reservationId = route.params?.reservationId;
+  // Time picker options
+  const hours = Array.from({ length: 12 }, (_, i) => i + 1);
+  const minutes = Array.from({ length: 60 }, (_, i) => i);
+  const ampm = ['AM', 'PM'];
 
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [date, setDate] = useState('');
-  const [time, setTime] = useState({ hour: 7, minute: 0, ampm: 'AM' });
-  const [diners, setDiners] = useState('1');
-  const [seating, setSeating] = useState('inside');
-  const [pickup, setPickup] = useState('no');
-  const [reservationStatus, setReservationStatus] = useState('Pending'); // New state for reservation status
-
-  const backendUrl = "https://lacasitabooking.onrender.com"; // Updated to your Render backend URL
-
-  // Date Picker Logic
-  const today = new Date();
-  const [currentWeekStart, setCurrentWeekStart] = useState(new Date(today.setDate(today.getDate() - today.getDay())));
-
-  const getWeekDates = (startDate) => {
-    const dates = [];
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(startDate);
-      date.setDate(startDate.getDate() + i);
-      dates.push(date);
-    }
-    return dates;
+  // Handle form field changes
+  const handleChange = (name, value) => {
+    setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleDateChange = (newDate) => {
-    setDate(newDate.toISOString().split('T')[0]); // Format as YYYY-MM-DD
-  };
-
-  const handleWeekChange = (direction) => {
-    const newStartDate = new Date(currentWeekStart);
-    newStartDate.setDate(newStartDate.getDate() + (direction === 'next' ? 7 : -7));
-    if (newStartDate >= new Date(new Date().setDate(new Date().getDate() - new Date().getDay()))) {
-      setCurrentWeekStart(newStartDate);
-    }
-  };
-
-  // Time Picker Logic
+  // Handle time changes
   const handleTimeChange = (type, value) => {
-    setTime((prev) => ({ ...prev, [type]: value }));
+    setFormData(prev => ({
+      ...prev,
+      time: { ...prev.time, [type]: value }
+    }));
   };
 
+  // Toggle AM/PM
   const toggleAMPM = () => {
-    setTime((prev) => ({ ...prev, ampm: prev.ampm === 'AM' ? 'PM' : 'AM' }));
+    setFormData(prev => ({
+      ...prev,
+      time: { ...prev.time, ampm: prev.time.ampm === 'AM' ? 'PM' : 'AM' }
+    }));
   };
 
-  // Fetch reservation details if reservationId is present
-  useEffect(() => {
-    if (reservationId) {
-      fetch(`${backendUrl}/reservations/${reservationId}`)
-        .then((response) => response.json())
-        .then((data) => {
-          setName(data.name);
-          setEmail(data.email);
-          setPhone(data.phone);
-          setDate(data.date);
-          setTime(data.time);
-          setDiners(data.diners);
-          setSeating(data.seating);
-          setPickup(data.pickup);
-          setReservationStatus(data.status); // Update the reservation status
-        });
-    }
-  }, [reservationId]);
-
+  // Submit reservation
   const handleSubmit = async () => {
-    const reservation = {
-      name,
-      email,
-      phone,
-      date,
-      time: `${time.hour}:${String(time.minute).padStart(2, '0')} ${time.ampm}`,
-      diners,
-      seating,
-      pickup,
-    };
-
+    setIsSubmitting(true);
     try {
+      const reservation = {
+        ...formData,
+        time: `${formData.time.hour}:${String(formData.time.minute).padStart(2, '0')} ${formData.time.ampm}`
+      };
+
       const response = await fetch(`${backendUrl}/reservations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reservation),
+        body: JSON.stringify(reservation)
       });
 
+      const data = await response.json();
+      
       if (!response.ok) {
-        const errorData = await response.json();
-        console.error("Backend error:", errorData);
-        alert(`Failed to submit reservation: ${errorData.message}`);
-        return;
+        throw new Error(data.message || 'Failed to submit reservation');
       }
 
-      const data = await response.json();
-      alert(data.message);
+      Alert.alert(
+        "Success",
+        data.message || "Reservation submitted successfully!",
+        [{ text: "OK" }]
+      );
     } catch (error) {
-      console.error("Frontend error:", error);
-      alert('Failed to submit reservation. Please try again later.');
+      Alert.alert(
+        "Error",
+        error.message || "An error occurred. Please try again.",
+        [{ text: "OK" }]
+      );
+      console.error("Submission error:", error);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text>Name:</Text>
-      <TextInput value={name} onChangeText={setName} style={styles.input} />
+      <Text style={styles.label}>Name:</Text>
+      <TextInput
+        style={styles.input}
+        value={formData.name}
+        onChangeText={(text) => handleChange('name', text)}
+      />
 
-      <Text>Email:</Text>
-      <TextInput value={email} onChangeText={setEmail} style={styles.input} />
+      <Text style={styles.label}>Email:</Text>
+      <TextInput
+        style={styles.input}
+        keyboardType="email-address"
+        value={formData.email}
+        onChangeText={(text) => handleChange('email', text)}
+      />
 
-      <Text>Phone:</Text>
-      <TextInput value={phone} onChangeText={setPhone} style={styles.input} />
+      <Text style={styles.label}>Phone:</Text>
+      <TextInput
+        style={styles.input}
+        keyboardType="phone-pad"
+        value={formData.phone}
+        onChangeText={(text) => handleChange('phone', text)}
+      />
 
-      <Text>Date:</Text>
-      <View style={styles.datePicker}>
-        <View style={styles.weekDates}>
-          {getWeekDates(currentWeekStart).map((dateObj, index) => (
-            <View key={index} style={styles.dateContainer}>
-              <TouchableOpacity
-                onPress={() => handleDateChange(dateObj)}
-                style={[styles.dateButton, date === dateObj.toISOString().split('T')[0] && styles.selectedDate]}
-              >
-                <Text>{dateObj.toLocaleDateString('en-US', { weekday: 'short' })}</Text>
-                <Text>{dateObj.toLocaleDateString('en-US', { day: 'numeric' })}</Text>
-              </TouchableOpacity>
-              {index === 0 && (
-                <TouchableOpacity onPress={() => handleWeekChange('prev')} style={styles.arrowButton}>
-                  <Text style={styles.arrow}>←</Text>
-                </TouchableOpacity>
-              )}
-              {index === 6 && (
-                <TouchableOpacity onPress={() => handleWeekChange('next')} style={styles.arrowButton}>
-                  <Text style={styles.arrow}>→</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          ))}
-        </View>
-      </View>
+      <Text style={styles.label}>Date:</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="YYYY-MM-DD"
+        value={formData.date}
+        onChangeText={(text) => handleChange('date', text)}
+      />
 
-      <Text>Time:</Text>
+      <Text style={styles.label}>Time:</Text>
       <View style={styles.timePicker}>
         <FlatList
           horizontal
-          data={Array.from({ length: 12 }, (_, i) => ({ id: i + 1, label: `${i + 1}` }))}
-          keyExtractor={(item) => item.id.toString()}
+          data={hours}
+          keyExtractor={(item) => item.toString()}
           renderItem={({ item }) => (
             <TouchableOpacity
-              style={[styles.timeButton, time.hour === item.id && styles.selectedTime]}
-              onPress={() => handleTimeChange('hour', item.id)}
+              style={[
+                styles.timeButton,
+                formData.time.hour === item && styles.selectedTime
+              ]}
+              onPress={() => handleTimeChange('hour', item)}
             >
-              <Text>{item.label}</Text>
+              <Text>{item}</Text>
             </TouchableOpacity>
           )}
         />
+        
         <Text>:</Text>
+        
         <FlatList
           horizontal
-          data={Array.from({ length: 60 }, (_, i) => ({ id: i, label: i.toString().padStart(2, '0') }))}
-          keyExtractor={(item) => item.id.toString()}
+          data={minutes}
+          keyExtractor={(item) => item.toString()}
           renderItem={({ item }) => (
             <TouchableOpacity
-              style={[styles.timeButton, time.minute === item.id && styles.selectedTime]}
-              onPress={() => handleTimeChange('minute', item.id)}
+              style={[
+                styles.timeButton,
+                formData.time.minute === item && styles.selectedTime
+              ]}
+              onPress={() => handleTimeChange('minute', item)}
             >
-              <Text>{item.label}</Text>
+              <Text>{String(item).padStart(2, '0')}</Text>
             </TouchableOpacity>
           )}
         />
+        
         <FlatList
           horizontal
-          data={[{ id: 1, label: 'AM' }, { id: 2, label: 'PM' }]}
-          keyExtractor={(item) => item.id.toString()}
+          data={ampm}
+          keyExtractor={(item) => item}
           renderItem={({ item }) => (
             <TouchableOpacity
-              style={[styles.timeButton, time.ampm === item.label && styles.selectedTime]}
-              onPress={() => handleTimeChange('ampm', item.label)}
+              style={[
+                styles.timeButton,
+                formData.time.ampm === item && styles.selectedTime
+              ]}
+              onPress={toggleAMPM}
             >
-              <Text>{item.label}</Text>
+              <Text>{item}</Text>
             </TouchableOpacity>
           )}
         />
       </View>
 
-      <Text>Number of Diners:</Text>
+      <Text style={styles.label}>Number of Diners:</Text>
       <FlatList
         horizontal
-        data={Array.from({ length: 10 }, (_, i) => ({ id: i + 1, label: `${i + 1}` }))}
-        keyExtractor={(item) => item.id.toString()}
+        data={Array.from({ length: 10 }, (_, i) => i + 1)}
+        keyExtractor={(item) => item.toString()}
         renderItem={({ item }) => (
           <TouchableOpacity
-            style={[styles.timeButton, diners === item.label && styles.selectedTime]}
-            onPress={() => setDiners(item.label)}
+            style={[
+              styles.timeButton,
+              formData.diners === item.toString() && styles.selectedTime
+            ]}
+            onPress={() => handleChange('diners', item.toString())}
           >
-            <Text>{item.label}</Text>
+            <Text>{item}</Text>
           </TouchableOpacity>
         )}
       />
 
-      <Text>Seating Preference:</Text>
+      <Text style={styles.label}>Seating Preference:</Text>
       <FlatList
         horizontal
-        data={[{ id: 1, label: 'Inside' }, { id: 2, label: 'Outside' }]}
-        keyExtractor={(item) => item.id.toString()}
+        data={['Inside', 'Outside']}
+        keyExtractor={(item) => item}
         renderItem={({ item }) => (
           <TouchableOpacity
-            style={[styles.timeButton, seating === item.label.toLowerCase() && styles.selectedTime]}
-            onPress={() => setSeating(item.label.toLowerCase())}
+            style={[
+              styles.timeButton,
+              formData.seating === item.toLowerCase() && styles.selectedTime
+            ]}
+            onPress={() => handleChange('seating', item.toLowerCase())}
           >
-            <Text>{item.label}</Text>
+            <Text>{item}</Text>
           </TouchableOpacity>
         )}
       />
 
-      <Text>Require Pickup and Drop-off?</Text>
+      <Text style={styles.label}>Require Pickup:</Text>
       <FlatList
         horizontal
-        data={[{ id: 1, label: 'No' }, { id: 2, label: 'Yes' }]}
-        keyExtractor={(item) => item.id.toString()}
+        data={['No', 'Yes']}
+        keyExtractor={(item) => item}
         renderItem={({ item }) => (
           <TouchableOpacity
-            style={[styles.timeButton, pickup === item.label.toLowerCase() && styles.selectedTime]}
-            onPress={() => setPickup(item.label.toLowerCase())}
+            style={[
+              styles.timeButton,
+              formData.pickup === item.toLowerCase() && styles.selectedTime
+            ]}
+            onPress={() => handleChange('pickup', item.toLowerCase())}
           >
-            <Text>{item.label}</Text>
+            <Text>{item}</Text>
           </TouchableOpacity>
         )}
       />
 
-      <Text>Reservation Status: {reservationStatus}</Text> {/* Display reservation status */}
-
-      <Button title="Submit Reservation" onPress={handleSubmit} />
+      <Button
+        title={isSubmitting ? "Submitting..." : "Submit Reservation"}
+        onPress={handleSubmit}
+        disabled={isSubmitting}
+      />
     </ScrollView>
-  );
-};
-
-// App Component with Navigation
-const App = () => {
-  return (
-    <NavigationContainer>
-      <Stack.Navigator>
-        <Stack.Screen
-          name="ReservationForm"
-          component={ReservationForm}
-          options={{ title: 'Make a Reservation' }}
-        />
-      </Stack.Navigator>
-    </NavigationContainer>
   );
 };
 
@@ -267,41 +250,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ccc',
     padding: 10,
-    marginBottom: 10,
-  },
-  datePicker: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  weekDates: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    flex: 1,
-    marginHorizontal: 10,
-  },
-  dateContainer: {
-    alignItems: 'center',
-  },
-  dateButton: {
-    padding: 10,
-    borderWidth: 1,
-    borderColor: '#ccc',
+    marginBottom: 15,
     borderRadius: 5,
-    alignItems: 'center',
   },
-  selectedDate: {
-    backgroundColor: '#ddd',
-  },
-  arrowButton: {
-    padding: 10,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 5,
+  label: {
+    fontSize: 16,
+    marginBottom: 5,
     marginTop: 10,
-  },
-  arrow: {
-    fontSize: 24,
   },
   timePicker: {
     flexDirection: 'row',
@@ -320,4 +275,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default App;
+export default ReservationForm;

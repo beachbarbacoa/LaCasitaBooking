@@ -7,7 +7,9 @@ import logging
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from threading import Thread
 
+# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
@@ -20,7 +22,6 @@ app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# Define the Reservation model
 class Reservation(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
@@ -45,11 +46,11 @@ app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
 telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
 telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')
 
-# Dictionary to track pending denials {chat_id: reservation_id}
-denial_requests = {}
+# State management
+pending_denials = {}
 
-# Helper function to send email
-def send_email(subject, recipient, body):
+def send_email_async(subject, recipient, body):
+    """Non-blocking email sender"""
     try:
         msg = MIMEMultipart()
         msg['From'] = os.getenv('SENDER_EMAIL')
@@ -61,125 +62,53 @@ def send_email(subject, recipient, body):
             server.starttls()
             server.login(app.config['MAIL_USERNAME'], app.config['MAIL_PASSWORD'])
             server.send_message(msg)
-        logger.debug("Email sent successfully")
-        return True
+        logger.debug(f"Email sent to {recipient}")
     except Exception as e:
-        logger.error(f"Email sending failed: {e}")
-        return False
+        logger.error(f"Email failed: {e}")
 
-# Send Telegram message with buttons
-def send_telegram_message(reservation):
-    message = (
-        f"New Reservation:\n"
-        f"Name: {reservation.name}\n"
-        f"Email: {reservation.email}\n"
-        f"Phone: {reservation.phone}\n"
-        f"Date: {reservation.date}\n"
-        f"Time: {reservation.time}\n"
-        f"Diners: {reservation.diners}\n"
-        f"Seating: {reservation.seating}\n"
-        f"Pickup: {reservation.pickup}"
-    )
-    
-    payload = {
-        "chat_id": telegram_chat_id,
-        "text": message,
-        "reply_markup": {
-            "inline_keyboard": [
-                [
-                    {"text": "Accept", "callback_data": f"accept_{reservation.id}"},
-                    {"text": "Deny", "callback_data": f"deny_{reservation.id}"}
-                ]
-            ]
-        }
-    }
-    
+def send_telegram_async(reservation):
+    """Non-blocking Telegram sender"""
     try:
+        message = f"""New Reservation:
+Name: {reservation.name}
+Email: {reservation.email}
+Date: {reservation.date}
+Time: {reservation.time}
+Diners: {reservation.diners}"""
+
         response = requests.post(
             f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
-            json=payload
+            json={
+                "chat_id": telegram_chat_id,
+                "text": message,
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [
+                            {"text": "✅ Accept", "callback_data": f"accept_{reservation.id}"},
+                            {"text": "❌ Deny", "callback_data": f"deny_{reservation.id}"}
+                        ]
+                    ]
+                }
+            },
+            timeout=3  # 3-second timeout
         )
         response.raise_for_status()
-        return True
     except Exception as e:
-        logger.error(f"Telegram message failed: {e}")
-        return False
+        logger.error(f"Telegram failed: {e}")
 
-# Handle Telegram callbacks
-@app.route("/telegram-callback", methods=["POST"])
-def telegram_callback():
-    try:
-        data = request.json
-        logger.debug(f"Received callback: {data}")
-        
-        if "callback_query" in data:
-            callback = data["callback_query"]
-            callback_data = callback["data"]
-            reservation_id = int(callback_data.split("_")[1])
-            chat_id = str(callback["message"]["chat"]["id"])
-            
-            if callback_data.startswith("accept"):
-                reservation = Reservation.query.get(reservation_id)
-                if reservation:
-                    reservation.status = "Confirmed"
-                    db.session.commit()
-                    send_email(
-                        "Reservation Confirmed",
-                        reservation.email,
-                        f"Your reservation for {reservation.date} at {reservation.time} has been confirmed!"
-                    )
-                    return jsonify({"status": "success"})
-            
-            elif callback_data.startswith("deny"):
-                reservation = Reservation.query.get(reservation_id)
-                if reservation:
-                    reservation.status = "Denied"
-                    db.session.commit()
-                    denial_requests[chat_id] = reservation_id
-                    
-                    requests.post(
-                        f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
-                        json={
-                            "chat_id": chat_id,
-                            "text": "Please provide a reason for denial:",
-                            "reply_to_message_id": callback["message"]["message_id"],
-                            "reply_markup": {"force_reply": True}
-                        }
-                    )
-                    return jsonify({"status": "awaiting_reason"})
-        
-        elif "message" in data and "reply_to_message" in data["message"]:
-            message = data["message"]
-            chat_id = str(message["chat"]["id"])
-            
-            if chat_id in denial_requests:
-                reservation = Reservation.query.get(denial_requests[chat_id])
-                if reservation:
-                    reason = message.get("text", "No reason provided")
-                    reservation.denial_reason = reason
-                    db.session.commit()
-                    
-                    send_email(
-                        "Reservation Denied",
-                        reservation.email,
-                        f"Your reservation was denied. Reason: {reason}\n\n"
-                        f"Details:\nDate: {reservation.date}\nTime: {reservation.time}"
-                    )
-                    
-                    del denial_requests[chat_id]
-                    return jsonify({"status": "success"})
-        
-        return jsonify({"status": "ignored"}), 200
-    
-    except Exception as e:
-        logger.error(f"Callback error: {e}")
-        abort(500, "Internal server error")
-
-# Create new reservation
 @app.route("/reservations", methods=["POST"])
 def create_reservation():
+    """Create reservation endpoint with async notifications"""
     try:
         data = request.json
+        logger.debug(f"New reservation: {data}")
+
+        # Validate input
+        required_fields = ["name", "email", "phone", "time", "date", "diners", "seating", "pickup"]
+        if not all(field in data for field in required_fields):
+            abort(400, "Missing required fields")
+
+        # Create reservation
         reservation = Reservation(
             name=data["name"],
             email=data["email"],
@@ -193,49 +122,113 @@ def create_reservation():
         
         db.session.add(reservation)
         db.session.commit()
-        
-        # Initialize webhook on first request
-        if not hasattr(app, 'webhook_initialized'):
-            try:
-                webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/telegram-callback"
-                requests.post(
-                    f"https://api.telegram.org/bot{telegram_bot_token}/setWebhook",
-                    json={"url": webhook_url}
-                )
-                app.webhook_initialized = True
-                logger.debug("Telegram webhook initialized")
-            except Exception as e:
-                logger.error(f"Webhook setup failed: {e}")
 
-        telegram_sent = send_telegram_message(reservation)
-        email_sent = send_email(
-            "Reservation Request Received",
+        # Start async notifications
+        Thread(target=send_telegram_async, args=(reservation,)).start()
+        Thread(target=send_email_async, args=(
+            "Reservation Received",
             reservation.email,
-            f"Your reservation request for {reservation.date} at {reservation.time} has been received."
-        )
-        
-        return jsonify({
-            "id": reservation.id,
-            "telegram_sent": telegram_sent,
-            "email_sent": email_sent
-        })
-    
-    except Exception as e:
-        logger.error(f"Reservation error: {e}")
-        abort(400, "Invalid reservation data")
+            f"Hello {reservation.name},\n\nWe've received your reservation for {reservation.date} at {reservation.time}."
+        )).start()
 
-# Create tables and initialize
+        return jsonify({
+            "status": "success",
+            "message": "Reservation created successfully",
+            "reservation_id": reservation.id
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Reservation failed: {e}")
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route("/telegram-callback", methods=["POST"])
+def telegram_callback():
+    """Handle Telegram interactions"""
+    try:
+        data = request.json
+        logger.debug(f"Telegram callback: {data}")
+
+        if "callback_query" in data:
+            callback = data["callback_query"]
+            callback_data = callback["data"]
+            reservation_id = int(callback_data.split("_")[1])
+            chat_id = callback["message"]["chat"]["id"]
+            
+            reservation = Reservation.query.get(reservation_id)
+            if not reservation:
+                abort(404, "Reservation not found")
+
+            if callback_data.startswith("accept"):
+                reservation.status = "Confirmed"
+                db.session.commit()
+                
+                Thread(target=send_email_async, args=(
+                    "Reservation Confirmed",
+                    reservation.email,
+                    f"Your reservation for {reservation.date} at {reservation.time} is confirmed!"
+                )).start()
+                
+                return jsonify({"status": "confirmed"})
+
+            elif callback_data.startswith("deny"):
+                pending_denials[str(chat_id)] = reservation_id
+                
+                requests.post(
+                    f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
+                    json={
+                        "chat_id": chat_id,
+                        "text": "Please provide a reason for denial:",
+                        "reply_markup": {"force_reply": True}
+                    },
+                    timeout=3
+                )
+                return jsonify({"status": "awaiting_reason"})
+
+        elif "message" in data and "reply_to_message" in data["message"]:
+            message = data["message"]
+            chat_id = str(message["chat"]["id"])
+            
+            if chat_id in pending_denials:
+                reservation = Reservation.query.get(pending_denials[chat_id])
+                if reservation:
+                    reason = message.get("text", "No reason provided")
+                    reservation.denial_reason = reason
+                    reservation.status = "Denied"
+                    db.session.commit()
+                    
+                    Thread(target=send_email_async, args=(
+                        "Reservation Update",
+                        reservation.email,
+                        f"Your reservation for {reservation.date} was denied.\nReason: {reason}"
+                    )).start()
+                    
+                    del pending_denials[chat_id]
+                    return jsonify({"status": "denied"})
+
+        return jsonify({"status": "ignored"}), 200
+
+    except Exception as e:
+        logger.error(f"Callback error: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route("/test", methods=["GET"])
+def test_endpoint():
+    """Health check endpoint"""
+    return jsonify({
+        "status": "running",
+        "service": "Reservation System"
+    })
+
+# Initialize database
 with app.app_context():
     db.create_all()
-    try:
-        webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/telegram-callback"
-        requests.post(
-            f"https://api.telegram.org/bot{telegram_bot_token}/setWebhook",
-            json={"url": webhook_url}
-        )
-        logger.debug("Initial webhook setup attempted")
-    except Exception as e:
-        logger.error(f"Initial webhook setup failed: {e}")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
