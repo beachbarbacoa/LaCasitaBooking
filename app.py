@@ -9,18 +9,18 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 app = Flask(__name__)
-CORS(app)  # Allow requests from all origins
+CORS(app)
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Database configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')  # Use PostgreSQL URL from Render
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# Define the Reservation model
+# Define the Reservation model - CORRECTED SYNTAX
 class Reservation(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
@@ -32,230 +32,180 @@ class Reservation(db.Model):
     seating = db.Column(db.String(20), nullable=False)
     pickup = db.Column(db.String(10), nullable=False)
     status = db.Column(db.String(20), default="Pending")
-    denial_reason = db.Column(db.String(200))  # New field for denial reason
+    denial_reason = db.Column(db.String(200))
 
-# Create the database and tables
+# Create database tables
 with app.app_context():
     db.create_all()
 
-# Email configuration for SendGrid
+# Email configuration
 app.config['MAIL_SERVER'] = 'smtp.sendgrid.net'
-app.config['MAIL_PORT'] = 587  # Use port 587 for TLS (or 2525 if 587 is blocked)
+app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')  # Should be 'apikey'
-app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')  # Your SendGrid API key
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
 
 # Telegram setup
-telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN')  # Replace with your bot token
-telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')  # Replace with your chat ID
+telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')
 
-# Global variable to track pending denials
-pending_denial = None
+# Dictionary to track pending denials {chat_id: reservation_id}
+denial_requests = {}
 
-# Helper function to send Telegram message with inline buttons
-def send_telegram_message_with_buttons(reservation):
-    try:
-        message = (
-            f"New Reservation:\n"
-            f"Name: {reservation.name}\n"
-            f"Email: {reservation.email}\n"
-            f"Phone: {reservation.phone}\n"
-            f"Date: {reservation.date}\n"
-            f"Time: {reservation.time}\n"
-            f"Diners: {reservation.diners}\n"
-            f"Seating: {reservation.seating}\n"
-            f"Pickup: {reservation.pickup}"
-        )
-
-        url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
-        payload = {
-            "chat_id": telegram_chat_id,
-            "text": message,
-            "reply_markup": {
-                "inline_keyboard": [
-                    [
-                        {"text": "Accept", "callback_data": f"accept_{reservation.id}"},
-                        {"text": "Deny", "callback_data": f"deny_{reservation.id}"}
-                    ]
-                ]
-            }
-        }
-        response = requests.post(url, json=payload)
-        response.raise_for_status()
-        logger.debug("Telegram message with buttons sent successfully!")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to send Telegram message with buttons: {e}")
-        return False
-
-# Helper function to send email using SendGrid SMTP Relay
+# Helper function to send email
 def send_email(subject, recipient, body):
     try:
-        sender_email = os.getenv('MAIL_USERNAME')
-        sender_password = os.getenv('MAIL_PASSWORD')
-        smtp_server = app.config['MAIL_SERVER']
-        smtp_port = app.config['MAIL_PORT']
-        from_email = os.getenv('SENDER_EMAIL')
-
         msg = MIMEMultipart()
-        msg['From'] = from_email
+        msg['From'] = os.getenv('SENDER_EMAIL')
         msg['To'] = recipient
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
 
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
+        with smtplib.SMTP(app.config['MAIL_SERVER'], app.config['MAIL_PORT']) as server:
             server.starttls()
-            server.login(sender_email, sender_password)
-            server.sendmail(from_email, recipient, msg.as_string())
-        logger.debug("Email sent successfully!")
+            server.login(app.config['MAIL_USERNAME'], app.config['MAIL_PASSWORD'])
+            server.send_message(msg)
+        logger.debug("Email sent successfully")
         return True
-    except smtplib.SMTPException as e:
-        logger.error(f"SMTP error occurred: {e}")
-        return False
     except Exception as e:
-        logger.error(f"Unexpected error occurred: {e}")
+        logger.error(f"Email sending failed: {e}")
         return False
 
-# Route to handle Telegram callback queries
+# Set up Telegram webhook on startup
+@app.before_first_request
+def set_webhook():
+    webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/telegram-callback"
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{telegram_bot_token}/setWebhook",
+            json={"url": webhook_url}
+        )
+        logger.debug(f"Webhook setup response: {response.json()}")
+    except Exception as e:
+        logger.error(f"Webhook setup failed: {e}")
+
+# Send Telegram message with buttons
+def send_telegram_message(reservation):
+    message = (
+        f"New Reservation:\n"
+        f"Name: {reservation.name}\n"
+        f"Email: {reservation.email}\n"
+        f"Phone: {reservation.phone}\n"
+        f"Date: {reservation.date}\n"
+        f"Time: {reservation.time}\n"
+        f"Diners: {reservation.diners}\n"
+        f"Seating: {reservation.seating}\n"
+        f"Pickup: {reservation.pickup}"
+    )
+    
+    payload = {
+        "chat_id": telegram_chat_id,
+        "text": message,
+        "reply_markup": {
+            "inline_keyboard": [
+                [
+                    {"text": "Accept", "callback_data": f"accept_{reservation.id}"},
+                    {"text": "Deny", "callback_data": f"deny_{reservation.id}"}
+                ]
+            ]
+        }
+    }
+    
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
+            json=payload
+        )
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        logger.error(f"Telegram message failed: {e}")
+        return False
+
+# Handle Telegram callbacks
 @app.route("/telegram-callback", methods=["POST"])
 def telegram_callback():
     try:
         data = request.json
-        callback_query = data.get("callback_query")
-        if not callback_query:
-            abort(400, "No callback query found")
-
-        callback_data = callback_query.get("data")
-        reservation_id = int(callback_data.split("_")[1])
-        reservation = Reservation.query.get(reservation_id)
-
-        if not reservation:
-            abort(404, "Reservation not found")
-
-        if callback_data.startswith("accept"):
-            # Handle acceptance
-            reservation.status = "Confirmed"
-            db.session.commit()
-
-            # Send confirmation email
-            send_email(
-                subject="Reservation Confirmed",
-                recipient=reservation.email,
-                body=f"""
-                Your reservation has been confirmed, {reservation.name}!
-                Date: {reservation.date}
-                Time: {reservation.time}
-                Diners: {reservation.diners}
-                Seating: {reservation.seating}
-                Pickup: {reservation.pickup}
-
-                We look forward to seeing you!
-                """
-            )
-            return jsonify({"message": "Reservation confirmed and email sent"})
-
-        elif callback_data.startswith("deny"):
-            # Handle denial
-            reservation.status = "Denied"
-            db.session.commit()
-
-            # Prompt the operator for a reason
-            url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
-            payload = {
-                "chat_id": telegram_chat_id,
-                "text": "Please provide a reason for denying this reservation:",
-                "reply_markup": {
-                    "force_reply": True  # Force the operator to reply
-                }
-            }
-            response = requests.post(url, json=payload)
-            response.raise_for_status()
-
-            # Store the reservation ID in the operator's session
-            global pending_denial
-            pending_denial = reservation_id
-
-            return jsonify({"message": "Prompted operator for denial reason"})
-
-        else:
-            abort(400, "Invalid callback data")
-
+        logger.debug(f"Received callback: {data}")
+        
+        # Handle callback queries (button presses)
+        if "callback_query" in data:
+            callback = data["callback_query"]
+            callback_data = callback["data"]
+            reservation_id = int(callback_data.split("_")[1])
+            chat_id = str(callback["message"]["chat"]["id"])
+            
+            if callback_data.startswith("accept"):
+                # Handle acceptance
+                reservation = Reservation.query.get(reservation_id)
+                if reservation:
+                    reservation.status = "Confirmed"
+                    db.session.commit()
+                    send_email(
+                        "Reservation Confirmed",
+                        reservation.email,
+                        f"Your reservation for {reservation.date} at {reservation.time} has been confirmed!"
+                    )
+                    return jsonify({"status": "success"})
+            
+            elif callback_data.startswith("deny"):
+                # Handle denial request
+                reservation = Reservation.query.get(reservation_id)
+                if reservation:
+                    reservation.status = "Denied"
+                    db.session.commit()
+                    
+                    # Store pending denial
+                    denial_requests[chat_id] = reservation_id
+                    
+                    # Request reason
+                    requests.post(
+                        f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
+                        json={
+                            "chat_id": chat_id,
+                            "text": "Please provide a reason for denial:",
+                            "reply_to_message_id": callback["message"]["message_id"],
+                            "reply_markup": {"force_reply": True}
+                        }
+                    )
+                    return jsonify({"status": "awaiting_reason"})
+        
+        # Handle message replies (denial reasons)
+        elif "message" in data and "reply_to_message" in data["message"]:
+            message = data["message"]
+            chat_id = str(message["chat"]["id"])
+            
+            if chat_id in denial_requests:
+                reservation = Reservation.query.get(denial_requests[chat_id])
+                if reservation:
+                    reason = message.get("text", "No reason provided")
+                    reservation.denial_reason = reason
+                    db.session.commit()
+                    
+                    # Send denial email
+                    send_email(
+                        "Reservation Denied",
+                        reservation.email,
+                        f"Your reservation was denied. Reason: {reason}\n\n"
+                        f"Details:\nDate: {reservation.date}\nTime: {reservation.time}"
+                    )
+                    
+                    # Clean up
+                    del denial_requests[chat_id]
+                    return jsonify({"status": "success"})
+        
+        return jsonify({"status": "ignored"}), 200
+    
     except Exception as e:
-        logger.error(f"Error in telegram_callback: {e}")
+        logger.error(f"Callback error: {e}")
         abort(500, "Internal server error")
 
-# Route to handle operator's reply with denial reason
-@app.route("/telegram-reply", methods=["POST"])
-def telegram_reply():
-    try:
-        logger.debug("Received reply data: %s", request.json)  # Log the incoming request
-        data = request.json
-        message = data.get("message")
-        if not message:
-            logger.error("No message found in request")
-            abort(400, "No message found")
-
-        # Check if this is a reply to a denial prompt
-        global pending_denial
-        if not pending_denial:
-            logger.error("No pending denial found")
-            abort(400, "No pending denial found")
-
-        # Get the reservation
-        reservation = Reservation.query.get(pending_denial)
-        if not reservation:
-            logger.error("Reservation not found for ID: %s", pending_denial)
-            abort(404, "Reservation not found")
-
-        # Update the reservation with the denial reason
-        reservation.denial_reason = message.get("text")
-        db.session.commit()
-        logger.debug("Denial reason updated for reservation ID: %s", pending_denial)
-
-        # Send denial email to the guest
-        email_sent = send_email(
-            subject="Reservation Denied",
-            recipient=reservation.email,
-            body=f"""
-            We regret to inform you that your reservation has been denied.
-            Reason: {reservation.denial_reason}
-
-            Date: {reservation.date}
-            Time: {reservation.time}
-            Diners: {reservation.diners}
-            Seating: {reservation.seating}
-            Pickup: {reservation.pickup}
-
-            Please try booking a different time.
-            """
-        )
-        if email_sent:
-            logger.debug("Denial email sent successfully")
-        else:
-            logger.error("Failed to send denial email")
-
-        # Clear the pending denial
-        pending_denial = None
-
-        return jsonify({"message": "Denial reason received and email sent"})
-
-    except Exception as e:
-        logger.error(f"Error in telegram_reply: {e}")
-        abort(500, "Internal server error")
-
-# Routes
-@app.route("/")
-def home():
-    return "Welcome to the Reservation System!"
-
+# Create new reservation
 @app.route("/reservations", methods=["POST"])
 def create_reservation():
     try:
         data = request.json
-        required_fields = ["name", "email", "phone", "time", "date", "diners", "seating", "pickup"]
-        if not all(field in data for field in required_fields):
-            abort(400, "Missing required fields")
-
         reservation = Reservation(
             name=data["name"],
             email=data["email"],
@@ -264,70 +214,31 @@ def create_reservation():
             date=data["date"],
             diners=data["diners"],
             seating=data["seating"],
-            pickup=data["pickup"],
-            status="Pending"
+            pickup=data["pickup"]
         )
-
+        
         db.session.add(reservation)
         db.session.commit()
-
-        if send_telegram_message_with_buttons(reservation):
-            email_sent = send_email(
-                subject="Reservation Request Received",
-                recipient=reservation.email,
-                body=f"""
-                Thank you for your reservation request, {reservation.name}!
-                Date: {reservation.date}
-                Time: {reservation.time}
-                Diners: {reservation.diners}
-                Seating: {reservation.seating}
-                Pickup: {reservation.pickup}
-
-                We will notify you once your reservation is confirmed.
-                """
-            )
-            if email_sent:
-                return jsonify({"message": "Reservation created and confirmation email sent", "reservation": {
-                    "id": reservation.id,
-                    "name": reservation.name,
-                    "email": reservation.email,
-                    "phone": reservation.phone,
-                    "time": reservation.time,
-                    "date": reservation.date,
-                    "diners": reservation.diners,
-                    "seating": reservation.seating,
-                    "pickup": reservation.pickup,
-                    "status": reservation.status
-                }})
-            else:
-                return jsonify({"message": "Reservation created but failed to send email", "reservation": {
-                    "id": reservation.id,
-                    "name": reservation.name,
-                    "email": reservation.email,
-                    "phone": reservation.phone,
-                    "time": reservation.time,
-                    "date": reservation.date,
-                    "diners": reservation.diners,
-                    "seating": reservation.seating,
-                    "pickup": reservation.pickup,
-                    "status": reservation.status
-                }})
-        else:
-            return jsonify({"message": "Reservation created but failed to send Telegram message", "reservation": {
-                "id": reservation.id,
-                "name": reservation.name,
-                "email": reservation.email,
-                "phone": reservation.phone,
-                "time": reservation.time,
-                "date": reservation.date,
-                "diners": reservation.diners,
-                "seating": reservation.seating,
-                "pickup": reservation.pickup,
-                "status": reservation.status
-            }})
+        
+        # Send Telegram notification
+        telegram_sent = send_telegram_message(reservation)
+        
+        # Send confirmation email
+        email_sent = send_email(
+            "Reservation Request Received",
+            reservation.email,
+            f"Your reservation request for {reservation.date} at {reservation.time} has been received."
+        )
+        
+        return jsonify({
+            "id": reservation.id,
+            "telegram_sent": telegram_sent,
+            "email_sent": email_sent
+        })
+    
     except Exception as e:
-        logger.error(f"Error in create_reservation: {e}")
-        abort(500, "Internal server error")
+        logger.error(f"Reservation error: {e}")
+        abort(400, "Invalid reservation data")
 
 # Run the server
 if __name__ == "__main__":
