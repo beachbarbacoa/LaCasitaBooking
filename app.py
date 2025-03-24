@@ -49,52 +49,61 @@ telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')
 # State management
 pending_denials = {}
 
-def send_email_async(subject, recipient, body):
-    """Non-blocking email sender"""
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = os.getenv('SENDER_EMAIL')
-        msg['To'] = recipient
-        msg['Subject'] = subject
-        msg.attach(MIMEText(body, 'html'))
+def send_email_async(app_context, subject, recipient, body):
+    """Non-blocking email sender with app context"""
+    def send_email():
+        with app_context:
+            try:
+                msg = MIMEMultipart()
+                msg['From'] = os.getenv('SENDER_EMAIL')
+                msg['To'] = recipient
+                msg['Subject'] = subject
+                msg.attach(MIMEText(body, 'html'))
 
-        with smtplib.SMTP(app.config['MAIL_SERVER'], app.config['MAIL_PORT']) as server:
-            server.starttls()
-            server.login(app.config['MAIL_USERNAME'], app.config['MAIL_PASSWORD'])
-            server.send_message(msg)
-        logger.debug(f"Email sent to {recipient}")
-    except Exception as e:
-        logger.error(f"Email failed: {e}")
+                with smtplib.SMTP(app.config['MAIL_SERVER'], app.config['MAIL_PORT']) as server:
+                    server.starttls()
+                    server.login(app.config['MAIL_USERNAME'], app.config['MAIL_PASSWORD'])
+                    server.send_message(msg)
+                logger.debug(f"Email sent to {recipient}")
+            except Exception as e:
+                logger.error(f"Email failed: {e}")
+    Thread(target=send_email).start()
 
-def send_telegram_async(reservation):
-    """Non-blocking Telegram sender"""
-    try:
-        message = f"""New Reservation:
+def send_telegram_async(app_context, reservation):
+    """Non-blocking Telegram sender with app context"""
+    def send_telegram():
+        with app_context:
+            try:
+                message = f"""New Reservation Request:
 Name: {reservation.name}
 Email: {reservation.email}
+Phone: {reservation.phone}
 Date: {reservation.date}
 Time: {reservation.time}
-Diners: {reservation.diners}"""
+Diners: {reservation.diners}
+Seating: {reservation.seating}
+Pickup: {reservation.pickup}"""
 
-        response = requests.post(
-            f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
-            json={
-                "chat_id": telegram_chat_id,
-                "text": message,
-                "reply_markup": {
-                    "inline_keyboard": [
-                        [
-                            {"text": "✅ Accept", "callback_data": f"accept_{reservation.id}"},
-                            {"text": "❌ Deny", "callback_data": f"deny_{reservation.id}"}
-                        ]
-                    ]
-                }
-            },
-            timeout=3
-        )
-        response.raise_for_status()
-    except Exception as e:
-        logger.error(f"Telegram failed: {e}")
+                response = requests.post(
+                    f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
+                    json={
+                        "chat_id": telegram_chat_id,
+                        "text": message,
+                        "reply_markup": {
+                            "inline_keyboard": [
+                                [
+                                    {"text": "✅ Accept", "callback_data": f"accept_{reservation.id}"},
+                                    {"text": "❌ Deny", "callback_data": f"deny_{reservation.id}"}
+                                ]
+                            ]
+                        }
+                    },
+                    timeout=10
+                )
+                response.raise_for_status()
+            except Exception as e:
+                logger.error(f"Telegram failed: {e}")
+    Thread(target=send_telegram).start()
 
 @app.route("/reservations", methods=["POST"])
 def create_reservation():
@@ -123,13 +132,19 @@ def create_reservation():
         db.session.add(reservation)
         db.session.commit()
 
-        # Start async notifications
-        Thread(target=send_telegram_async, args=(reservation,)).start()
-        Thread(target=send_email_async, args=(
-            "Reservation Received",
+        # Create application context for background tasks
+        app_context = app.app_context()
+
+        # Start async notifications with proper context
+        send_telegram_async(app_context, reservation)
+        send_email_async(
+            app_context,
+            "Reservation Request Received",
             reservation.email,
-            f"Hello {reservation.name},<br><br>We've received your reservation for {reservation.date} at {reservation.time}."
-        )).start()
+            f"""Hello {reservation.name},<br><br>
+            We've received your reservation request for {reservation.date} at {reservation.time}.<br><br>
+            You will receive an email soon with your reservation confirmation."""
+        )
 
         return jsonify({
             "status": "success",
@@ -186,11 +201,13 @@ def telegram_callback():
                 reservation.status = "Confirmed"
                 db.session.commit()
                 
-                Thread(target=send_email_async, args=(
+                app_context = app.app_context()
+                send_email_async(
+                    app_context,
                     "Reservation Confirmed",
                     reservation.email,
                     f"Your reservation for {reservation.date} at {reservation.time} is confirmed!"
-                )).start()
+                )
                 
                 return jsonify({"status": "confirmed"})
 
@@ -221,13 +238,15 @@ def telegram_callback():
                     db.session.commit()
                     
                     frontend_url = os.getenv('FRONTEND_URL', 'https://your-frontend-url.com')
-                    Thread(target=send_email_async, args=(
+                    app_context = app.app_context()
+                    send_email_async(
+                        app_context,
                         "Reservation Update",
                         reservation.email,
                         f"""Your reservation for {reservation.date} at {reservation.time} was denied.<br>
 Reason: {reason}<br><br>
 <a href='{frontend_url}/?reservation_id={reservation.id}'>Click here to book a new time</a>"""
-                    )).start()
+                    )
                     
                     del pending_denials[chat_id]
                     return jsonify({"status": "denied"})
