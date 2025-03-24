@@ -20,7 +20,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# Define the Reservation model - CORRECTED SYNTAX
+# Define the Reservation model
 class Reservation(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
@@ -33,10 +33,6 @@ class Reservation(db.Model):
     pickup = db.Column(db.String(10), nullable=False)
     status = db.Column(db.String(20), default="Pending")
     denial_reason = db.Column(db.String(200))
-
-# Create database tables
-with app.app_context():
-    db.create_all()
 
 # Email configuration
 app.config['MAIL_SERVER'] = 'smtp.sendgrid.net'
@@ -70,19 +66,6 @@ def send_email(subject, recipient, body):
     except Exception as e:
         logger.error(f"Email sending failed: {e}")
         return False
-
-# Set up Telegram webhook on startup
-@app.before_first_request
-def set_webhook():
-    webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/telegram-callback"
-    try:
-        response = requests.post(
-            f"https://api.telegram.org/bot{telegram_bot_token}/setWebhook",
-            json={"url": webhook_url}
-        )
-        logger.debug(f"Webhook setup response: {response.json()}")
-    except Exception as e:
-        logger.error(f"Webhook setup failed: {e}")
 
 # Send Telegram message with buttons
 def send_telegram_message(reservation):
@@ -129,7 +112,6 @@ def telegram_callback():
         data = request.json
         logger.debug(f"Received callback: {data}")
         
-        # Handle callback queries (button presses)
         if "callback_query" in data:
             callback = data["callback_query"]
             callback_data = callback["data"]
@@ -137,7 +119,6 @@ def telegram_callback():
             chat_id = str(callback["message"]["chat"]["id"])
             
             if callback_data.startswith("accept"):
-                # Handle acceptance
                 reservation = Reservation.query.get(reservation_id)
                 if reservation:
                     reservation.status = "Confirmed"
@@ -150,16 +131,12 @@ def telegram_callback():
                     return jsonify({"status": "success"})
             
             elif callback_data.startswith("deny"):
-                # Handle denial request
                 reservation = Reservation.query.get(reservation_id)
                 if reservation:
                     reservation.status = "Denied"
                     db.session.commit()
-                    
-                    # Store pending denial
                     denial_requests[chat_id] = reservation_id
                     
-                    # Request reason
                     requests.post(
                         f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
                         json={
@@ -171,7 +148,6 @@ def telegram_callback():
                     )
                     return jsonify({"status": "awaiting_reason"})
         
-        # Handle message replies (denial reasons)
         elif "message" in data and "reply_to_message" in data["message"]:
             message = data["message"]
             chat_id = str(message["chat"]["id"])
@@ -183,7 +159,6 @@ def telegram_callback():
                     reservation.denial_reason = reason
                     db.session.commit()
                     
-                    # Send denial email
                     send_email(
                         "Reservation Denied",
                         reservation.email,
@@ -191,7 +166,6 @@ def telegram_callback():
                         f"Details:\nDate: {reservation.date}\nTime: {reservation.time}"
                     )
                     
-                    # Clean up
                     del denial_requests[chat_id]
                     return jsonify({"status": "success"})
         
@@ -220,10 +194,20 @@ def create_reservation():
         db.session.add(reservation)
         db.session.commit()
         
-        # Send Telegram notification
+        # Initialize webhook on first request
+        if not hasattr(app, 'webhook_initialized'):
+            try:
+                webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/telegram-callback"
+                requests.post(
+                    f"https://api.telegram.org/bot{telegram_bot_token}/setWebhook",
+                    json={"url": webhook_url}
+                )
+                app.webhook_initialized = True
+                logger.debug("Telegram webhook initialized")
+            except Exception as e:
+                logger.error(f"Webhook setup failed: {e}")
+
         telegram_sent = send_telegram_message(reservation)
-        
-        # Send confirmation email
         email_sent = send_email(
             "Reservation Request Received",
             reservation.email,
@@ -240,6 +224,18 @@ def create_reservation():
         logger.error(f"Reservation error: {e}")
         abort(400, "Invalid reservation data")
 
-# Run the server
+# Create tables and initialize
+with app.app_context():
+    db.create_all()
+    try:
+        webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/telegram-callback"
+        requests.post(
+            f"https://api.telegram.org/bot{telegram_bot_token}/setWebhook",
+            json={"url": webhook_url}
+        )
+        logger.debug("Initial webhook setup attempted")
+    except Exception as e:
+        logger.error(f"Initial webhook setup failed: {e}")
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
