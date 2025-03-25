@@ -237,7 +237,9 @@ def telegram_callback():
                     reservation.status = "Denied"
                     db.session.commit()
                     
-                    frontend_url = os.getenv('FRONTEND_URL', 'https://your-frontend-url.com')
+                    # Expo Go testing link (works on device with Expo Go)
+                    expo_go_link = f"exp://127.0.0.1:19000/--/reservation?reservation_id={reservation.id}"
+                    
                     app_context = app.app_context()
                     send_email_async(
                         app_context,
@@ -245,7 +247,8 @@ def telegram_callback():
                         reservation.email,
                         f"""Your reservation for {reservation.date} at {reservation.time} was denied.<br>
 Reason: {reason}<br><br>
-<a href='{frontend_url}/?reservation_id={reservation.id}'>Click here to book a new time</a>"""
+<a href='{expo_go_link}'>Click here to book a new time</a><br><br>
+Or copy this link to your phone: {expo_go_link}"""
                     )
                     
                     del pending_denials[chat_id]
