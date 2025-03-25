@@ -34,6 +34,7 @@ class Reservation(db.Model):
     pickup = db.Column(db.String(10), nullable=False)
     status = db.Column(db.String(20), default="Pending")
     denial_reason = db.Column(db.String(200))
+    telegram_message_id = db.Column(db.String(50))  # New field to track Telegram message ID
 
 # Email configuration
 app.config['MAIL_SERVER'] = 'smtp.sendgrid.net'
@@ -100,10 +101,39 @@ Pickup: {reservation.pickup}"""
                     },
                     timeout=10
                 )
+                response_data = response.json()
+                if response.ok:
+                    reservation.telegram_message_id = str(response_data['result']['message_id'])
+                    db.session.commit()
                 response.raise_for_status()
             except Exception as e:
                 logger.error(f"Telegram failed: {e}")
     Thread(target=send_telegram).start()
+
+def update_telegram_message(reservation_id, new_text, new_markup=None):
+    """Update the original Telegram message to show status"""
+    try:
+        reservation = Reservation.query.get(reservation_id)
+        if not reservation or not reservation.telegram_message_id:
+            return
+
+        payload = {
+            "chat_id": telegram_chat_id,
+            "message_id": reservation.telegram_message_id,
+            "text": new_text
+        }
+        
+        if new_markup:
+            payload["reply_markup"] = new_markup
+
+        response = requests.post(
+            f"https://api.telegram.org/bot{telegram_bot_token}/editMessageText",
+            json=payload,
+            timeout=5
+        )
+        response.raise_for_status()
+    except Exception as e:
+        logger.error(f"Failed to update Telegram message: {e}")
 
 @app.route("/reservations", methods=["POST"])
 def create_reservation():
@@ -191,7 +221,7 @@ def telegram_callback():
             callback = data["callback_query"]
             callback_data = callback["data"]
             reservation_id = int(callback_data.split("_")[1])
-            chat_id = callback["message"]["chat"]["id"]
+            message_id = callback["message"]["message_id"]
             
             reservation = Reservation.query.get(reservation_id)
             if not reservation:
@@ -200,6 +230,14 @@ def telegram_callback():
             if callback_data.startswith("accept"):
                 reservation.status = "Confirmed"
                 db.session.commit()
+                
+                # Update original message
+                original_text = callback["message"]["text"]
+                update_telegram_message(
+                    reservation_id,
+                    f"✅ ACCEPTED\n{original_text}",
+                    {"inline_keyboard": [[{"text": "✓ Accepted", "callback_data": "already_processed"}]]}
+                )
                 
                 app_context = app.app_context()
                 send_email_async(
@@ -212,12 +250,20 @@ def telegram_callback():
                 return jsonify({"status": "confirmed"})
 
             elif callback_data.startswith("deny"):
-                pending_denials[str(chat_id)] = reservation_id
+                pending_denials[str(callback["message"]["chat"]["id"])] = reservation_id
+                
+                # Update original message
+                original_text = callback["message"]["text"]
+                update_telegram_message(
+                    reservation_id,
+                    f"🔄 PROCESSING DENIAL\n{original_text}",
+                    {"inline_keyboard": [[{"text": "Processing...", "callback_data": "already_processing"}]]}
+                )
                 
                 requests.post(
                     f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
                     json={
-                        "chat_id": chat_id,
+                        "chat_id": callback["message"]["chat"]["id"],
                         "text": "Please provide a reason for denial:",
                         "reply_markup": {"force_reply": True}
                     },
@@ -237,9 +283,15 @@ def telegram_callback():
                     reservation.status = "Denied"
                     db.session.commit()
                     
-                    # Expo Go testing link (works on device with Expo Go)
-                    expo_go_link = f"exp://127.0.0.1:19000/--/reservation?reservation_id={reservation.id}"
+                    # Update original message
+                    original_text = data["message"]["reply_to_message"]["text"].replace("🔄 PROCESSING DENIAL\n", "")
+                    update_telegram_message(
+                        reservation.id,
+                        f"❌ DENIED\n{original_text}\nReason: {reason}",
+                        {"inline_keyboard": [[{"text": "✗ Denied", "callback_data": "already_processed"}]]}
+                    )
                     
+                    frontend_url = os.getenv('FRONTEND_URL', f"exp://127.0.0.1:19000/--/reservation?reservation_id={reservation.id}")
                     app_context = app.app_context()
                     send_email_async(
                         app_context,
@@ -247,8 +299,8 @@ def telegram_callback():
                         reservation.email,
                         f"""Your reservation for {reservation.date} at {reservation.time} was denied.<br>
 Reason: {reason}<br><br>
-<a href='{expo_go_link}'>Click here to book a new time</a><br><br>
-Or copy this link to your phone: {expo_go_link}"""
+<a href='{frontend_url}'>Click here to book a new time</a><br><br>
+Or copy this link to your phone: {frontend_url}"""
                     )
                     
                     del pending_denials[chat_id]
