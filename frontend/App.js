@@ -24,7 +24,7 @@ const ReservationForm = ({ route }) => {
     pickup: 'no'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const backendUrl = "https://your-render-url.onrender.com"; // REPLACE WITH YOUR ACTUAL RENDER URL
+  const backendUrl = "https://lacasitabooking.onrender.com"; // REPLACE WITH YOUR ACTUAL RENDER URL
 
   // Date picker logic
   const today = new Date();
