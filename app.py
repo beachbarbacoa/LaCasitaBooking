@@ -140,7 +140,7 @@ def update_telegram_message(reservation_id, new_text, new_markup=None):
     except Exception as e:
         logger.error(f"Failed to update Telegram message: {str(e)}")
 
-@app.route("/reservations", methods=["POST"])
+@app.route("/api/reservations", methods=["POST"])
 def create_reservation():
     """Create reservation endpoint with async notifications"""
     try:
@@ -222,7 +222,7 @@ def create_reservation():
             "message": "Internal server error"
         }), 500
 
-@app.route("/reservations/<int:reservation_id>", methods=["GET"])
+@app.route("/api/reservations/<int:reservation_id>", methods=["GET"])
 def get_reservation(reservation_id):
     """Get reservation details"""
     try:
@@ -251,7 +251,7 @@ def get_reservation(reservation_id):
             "message": "Reservation not found"
         }), 404
 
-@app.route("/telegram-callback", methods=["POST"])
+@app.route("/api/telegram-callback", methods=["POST"])
 def telegram_callback():
     """Handle Telegram interactions"""
     try:
@@ -356,7 +356,7 @@ Or copy this link to your phone: {frontend_url}"""
             "message": "Internal server error"
         }), 500
 
-@app.route("/reservations", methods=["GET"])
+@app.route("/api/reservations", methods=["GET"])
 def list_reservations():
     """List all reservations (for admin/concierge portal)"""
     try:
@@ -382,13 +382,28 @@ def list_reservations():
             "message": "Internal server error"
         }), 500
 
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def catch_all(path):
+    """Catch-all route for undefined endpoints"""
+    return jsonify({
+        "status": "error",
+        "message": "Endpoint not found",
+        "valid_endpoints": [
+            "/api/reservations",
+            "/api/reservations/<id>",
+            "/api/telegram-callback"
+        ]
+    }), 404
+
 @app.route("/test", methods=["GET"])
 def test_endpoint():
     """Health check endpoint"""
     return jsonify({
         "status": "running",
         "service": "Reservation System",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.utcnow().isoformat(),
+        "database": "connected" if db.session.execute("SELECT 1").scalar() else "disconnected"
     })
 
 # Initialize database

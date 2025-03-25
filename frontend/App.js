@@ -24,7 +24,7 @@ const ReservationForm = ({ route }) => {
     pickup: 'no'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const backendUrl = "https://your-render-url.onrender.com";
+  const backendUrl = "https://your-render-url.onrender.com"; // REPLACE WITH YOUR ACTUAL RENDER URL
 
   // Date picker logic
   const today = new Date();
@@ -81,7 +81,7 @@ const ReservationForm = ({ route }) => {
   // Load existing reservation if ID is provided
   useEffect(() => {
     if (route?.params?.reservationId) {
-      fetch(`${backendUrl}/reservations/${route.params.reservationId}`)
+      fetch(`${backendUrl}/api/reservations/${route.params.reservationId}`)
         .then(response => {
           if (!response.ok) {
             throw new Error('Failed to fetch reservation');
@@ -132,7 +132,10 @@ const ReservationForm = ({ route }) => {
         time: `${formData.time.hour}:${String(formData.time.minute).padStart(2, '0')} ${formData.time.ampm}`
       };
 
-      const response = await fetch(`${backendUrl}/reservations`, {
+      console.log("Submitting to:", `${backendUrl}/api/reservations`);
+      console.log("Data:", JSON.stringify(reservation, null, 2));
+
+      const response = await fetch(`${backendUrl}/api/reservations`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -140,6 +143,11 @@ const ReservationForm = ({ route }) => {
         },
         body: JSON.stringify(reservation)
       });
+
+      // Handle 404 specifically
+      if (response.status === 404) {
+        throw new Error('Server endpoint not found. Please check the backend URL.');
+      }
 
       // Handle response
       let responseData;
@@ -158,12 +166,28 @@ const ReservationForm = ({ route }) => {
       Alert.alert(
         "Success",
         responseData.message || "Reservation submitted successfully!",
-        [{ text: "OK" }]
+        [{ text: "OK", onPress: () => {
+          // Reset form after successful submission
+          setFormData({
+            name: '',
+            email: '',
+            phone: '',
+            date: '',
+            time: { hour: 7, minute: 0, ampm: 'PM' },
+            diners: '1',
+            seating: 'inside',
+            pickup: 'no'
+          });
+        }}]
       );
     } catch (error) {
+      let errorMessage = error.message;
+      if (error.message.includes('Failed to fetch')) {
+        errorMessage = "Could not connect to server. Please check your internet connection.";
+      }
       Alert.alert(
         "Error",
-        error.message || "An error occurred. Please try again.",
+        errorMessage || "An error occurred. Please try again.",
         [{ text: "OK" }]
       );
       console.error("Submission error:", error);
