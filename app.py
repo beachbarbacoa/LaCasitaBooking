@@ -8,8 +8,8 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from threading import Thread
+from datetime import datetime
 
-# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Database configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///reservations.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -34,14 +34,17 @@ class Reservation(db.Model):
     pickup = db.Column(db.String(10), nullable=False)
     status = db.Column(db.String(20), default="Pending")
     denial_reason = db.Column(db.String(200))
-    telegram_message_id = db.Column(db.String(50))  # New field to track Telegram message ID
+    telegram_message_id = db.Column(db.String(50))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 # Email configuration
-app.config['MAIL_SERVER'] = 'smtp.sendgrid.net'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.sendgrid.net')
+app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
+app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'true').lower() == 'true'
 app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
+app.config['SENDER_EMAIL'] = os.getenv('SENDER_EMAIL', 'no-reply@reservations.com')
 
 # Telegram setup
 telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -56,18 +59,19 @@ def send_email_async(app_context, subject, recipient, body):
         with app_context:
             try:
                 msg = MIMEMultipart()
-                msg['From'] = os.getenv('SENDER_EMAIL')
+                msg['From'] = app.config['SENDER_EMAIL']
                 msg['To'] = recipient
                 msg['Subject'] = subject
                 msg.attach(MIMEText(body, 'html'))
 
                 with smtplib.SMTP(app.config['MAIL_SERVER'], app.config['MAIL_PORT']) as server:
-                    server.starttls()
+                    if app.config['MAIL_USE_TLS']:
+                        server.starttls()
                     server.login(app.config['MAIL_USERNAME'], app.config['MAIL_PASSWORD'])
                     server.send_message(msg)
-                logger.debug(f"Email sent to {recipient}")
+                logger.info(f"Email sent to {recipient}")
             except Exception as e:
-                logger.error(f"Email failed: {e}")
+                logger.error(f"Email failed: {str(e)}")
     Thread(target=send_email).start()
 
 def send_telegram_async(app_context, reservation):
@@ -83,7 +87,8 @@ Date: {reservation.date}
 Time: {reservation.time}
 Diners: {reservation.diners}
 Seating: {reservation.seating}
-Pickup: {reservation.pickup}"""
+Pickup: {reservation.pickup}
+Status: {reservation.status}"""
 
                 response = requests.post(
                     f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
@@ -107,7 +112,7 @@ Pickup: {reservation.pickup}"""
                     db.session.commit()
                 response.raise_for_status()
             except Exception as e:
-                logger.error(f"Telegram failed: {e}")
+                logger.error(f"Telegram failed: {str(e)}")
     Thread(target=send_telegram).start()
 
 def update_telegram_message(reservation_id, new_text, new_markup=None):
@@ -133,19 +138,40 @@ def update_telegram_message(reservation_id, new_text, new_markup=None):
         )
         response.raise_for_status()
     except Exception as e:
-        logger.error(f"Failed to update Telegram message: {e}")
+        logger.error(f"Failed to update Telegram message: {str(e)}")
 
 @app.route("/reservations", methods=["POST"])
 def create_reservation():
     """Create reservation endpoint with async notifications"""
     try:
-        data = request.json
+        # Ensure request contains JSON
+        if not request.is_json:
+            return jsonify({
+                "status": "error",
+                "message": "Request must be JSON"
+            }), 400
+
+        data = request.get_json()
         logger.debug(f"New reservation: {data}")
 
         # Validate input
         required_fields = ["name", "email", "phone", "time", "date", "diners", "seating", "pickup"]
-        if not all(field in data for field in required_fields):
-            abort(400, "Missing required fields")
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            return jsonify({
+                "status": "error",
+                "message": f"Missing required fields: {', '.join(missing_fields)}",
+                "missing_fields": missing_fields
+            }), 400
+
+        # Validate date format
+        try:
+            datetime.strptime(data["date"], "%Y-%m-%d")
+        except ValueError:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid date format. Use YYYY-MM-DD"
+            }), 400
 
         # Create reservation
         reservation = Reservation(
@@ -179,15 +205,21 @@ def create_reservation():
         return jsonify({
             "status": "success",
             "message": "Reservation created successfully",
-            "reservation_id": reservation.id
-        }), 200
+            "reservation_id": reservation.id,
+            "data": {
+                "name": reservation.name,
+                "email": reservation.email,
+                "date": reservation.date,
+                "time": reservation.time
+            }
+        }), 201
 
     except Exception as e:
-        logger.error(f"Reservation failed: {e}")
+        logger.error(f"Reservation failed: {str(e)}")
         db.session.rollback()
         return jsonify({
             "status": "error",
-            "message": str(e)
+            "message": "Internal server error"
         }), 500
 
 @app.route("/reservations/<int:reservation_id>", methods=["GET"])
@@ -196,19 +228,28 @@ def get_reservation(reservation_id):
     try:
         reservation = Reservation.query.get_or_404(reservation_id)
         return jsonify({
-            "name": reservation.name,
-            "email": reservation.email,
-            "phone": reservation.phone,
-            "date": reservation.date,
-            "time": reservation.time,
-            "diners": reservation.diners,
-            "seating": reservation.seating,
-            "pickup": reservation.pickup,
-            "status": reservation.status
+            "status": "success",
+            "data": {
+                "name": reservation.name,
+                "email": reservation.email,
+                "phone": reservation.phone,
+                "date": reservation.date,
+                "time": reservation.time,
+                "diners": reservation.diners,
+                "seating": reservation.seating,
+                "pickup": reservation.pickup,
+                "status": reservation.status,
+                "denial_reason": reservation.denial_reason,
+                "created_at": reservation.created_at.isoformat(),
+                "updated_at": reservation.updated_at.isoformat()
+            }
         })
     except Exception as e:
-        logger.error(f"Failed to get reservation: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        logger.error(f"Failed to get reservation: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "Reservation not found"
+        }), 404
 
 @app.route("/telegram-callback", methods=["POST"])
 def telegram_callback():
@@ -309,10 +350,36 @@ Or copy this link to your phone: {frontend_url}"""
         return jsonify({"status": "ignored"}), 200
 
     except Exception as e:
-        logger.error(f"Callback error: {e}")
+        logger.error(f"Callback error: {str(e)}")
         return jsonify({
             "status": "error",
-            "message": str(e)
+            "message": "Internal server error"
+        }), 500
+
+@app.route("/reservations", methods=["GET"])
+def list_reservations():
+    """List all reservations (for admin/concierge portal)"""
+    try:
+        reservations = Reservation.query.order_by(Reservation.date, Reservation.time).all()
+        return jsonify({
+            "status": "success",
+            "count": len(reservations),
+            "data": [
+                {
+                    "id": r.id,
+                    "name": r.name,
+                    "date": r.date,
+                    "time": r.time,
+                    "status": r.status,
+                    "diners": r.diners
+                } for r in reservations
+            ]
+        })
+    except Exception as e:
+        logger.error(f"Failed to list reservations: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "Internal server error"
         }), 500
 
 @app.route("/test", methods=["GET"])
@@ -320,7 +387,8 @@ def test_endpoint():
     """Health check endpoint"""
     return jsonify({
         "status": "running",
-        "service": "Reservation System"
+        "service": "Reservation System",
+        "timestamp": datetime.utcnow().isoformat()
     })
 
 # Initialize database
@@ -328,4 +396,5 @@ with app.app_context():
     db.create_all()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    port = int(os.getenv('PORT', 8080))
+    app.run(host="0.0.0.0", port=port)

@@ -24,7 +24,7 @@ const ReservationForm = ({ route }) => {
     pickup: 'no'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const backendUrl = "https://lacasitabooking.onrender.com";
+  const backendUrl = "https://your-render-url.onrender.com";
 
   // Date picker logic
   const today = new Date();
@@ -82,7 +82,12 @@ const ReservationForm = ({ route }) => {
   useEffect(() => {
     if (route?.params?.reservationId) {
       fetch(`${backendUrl}/reservations/${route.params.reservationId}`)
-        .then(response => response.json())
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Failed to fetch reservation');
+          }
+          return response.json();
+        })
         .then(data => {
           setFormData({
             name: data.name,
@@ -94,6 +99,10 @@ const ReservationForm = ({ route }) => {
             seating: data.seating,
             pickup: data.pickup
           });
+        })
+        .catch(error => {
+          console.error("Error loading reservation:", error);
+          Alert.alert("Error", "Could not load reservation details");
         });
     }
   }, [route?.params?.reservationId]);
@@ -109,10 +118,15 @@ const ReservationForm = ({ route }) => {
     };
   };
 
-  // Submit reservation
+  // Submit reservation with enhanced error handling
   const handleSubmit = async () => {
     setIsSubmitting(true);
     try {
+      // Validate required fields
+      if (!formData.name || !formData.email || !formData.date) {
+        throw new Error('Please fill in all required fields');
+      }
+
       const reservation = {
         ...formData,
         time: `${formData.time.hour}:${String(formData.time.minute).padStart(2, '0')} ${formData.time.ampm}`
@@ -120,26 +134,30 @@ const ReservationForm = ({ route }) => {
 
       const response = await fetch(`${backendUrl}/reservations`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify(reservation)
       });
 
-      // First check if the response is JSON
+      // Handle response
+      let responseData;
       const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const text = await response.text();
-        throw new Error(text || 'Received non-JSON response');
+      if (contentType && contentType.includes('application/json')) {
+        responseData = await response.json();
+      } else {
+        const textResponse = await response.text();
+        throw new Error(textResponse || 'Invalid server response');
       }
 
-      const data = await response.json();
-      
       if (!response.ok) {
-        throw new Error(data.message || 'Failed to submit reservation');
+        throw new Error(responseData.message || `Server error: ${response.status}`);
       }
 
       Alert.alert(
         "Success",
-        data.message || "Reservation submitted successfully!",
+        responseData.message || "Reservation submitted successfully!",
         [{ text: "OK" }]
       );
     } catch (error) {
@@ -161,6 +179,7 @@ const ReservationForm = ({ route }) => {
         style={styles.input}
         value={formData.name}
         onChangeText={(text) => handleChange('name', text)}
+        placeholder="Full Name"
       />
 
       <Text style={styles.label}>Email:</Text>
@@ -169,6 +188,7 @@ const ReservationForm = ({ route }) => {
         keyboardType="email-address"
         value={formData.email}
         onChangeText={(text) => handleChange('email', text)}
+        placeholder="email@example.com"
       />
 
       <Text style={styles.label}>Phone:</Text>
@@ -177,6 +197,7 @@ const ReservationForm = ({ route }) => {
         keyboardType="phone-pad"
         value={formData.phone}
         onChangeText={(text) => handleChange('phone', text)}
+        placeholder="Phone number"
       />
 
       <Text style={styles.label}>Date:</Text>
@@ -343,6 +364,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 5,
     marginTop: 10,
+    fontWeight: 'bold',
   },
   datePicker: {
     flexDirection: 'row',
@@ -365,13 +387,15 @@ const styles = StyleSheet.create({
     borderColor: '#ccc',
     borderRadius: 5,
     alignItems: 'center',
+    minWidth: 50,
   },
   selectedDate: {
-    backgroundColor: '#ddd',
+    backgroundColor: '#e3f2fd',
+    borderColor: '#2196f3',
   },
   arrowButton: {
     padding: 10,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#f5f5f5',
     borderRadius: 5,
     marginTop: 10,
   },
@@ -389,9 +413,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ccc',
     borderRadius: 5,
+    minWidth: 40,
+    alignItems: 'center',
   },
   selectedTime: {
-    backgroundColor: '#ddd',
+    backgroundColor: '#e3f2fd',
+    borderColor: '#2196f3',
   },
 });
 
