@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 
 const ReservationForm = ({ route }) => {
-  // State for form data
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -24,11 +23,8 @@ const ReservationForm = ({ route }) => {
     pickup: 'no'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
-  // REPLACE THIS WITH YOUR ACTUAL RENDER URL
-  const backendUrl = "https://your-render-service-name.onrender.com"; 
+  const backendUrl = "https://lacasitabooking.onrender.com";
 
-  // Date picker logic
   const today = new Date();
   const [currentWeekStart, setCurrentWeekStart] = useState(new Date(today.setDate(today.getDate() - today.getDay())));
 
@@ -54,17 +50,14 @@ const ReservationForm = ({ route }) => {
     }
   };
 
-  // Time picker options
   const hours = Array.from({ length: 12 }, (_, i) => i + 1);
   const minutes = Array.from({ length: 60 }, (_, i) => i);
   const ampm = ['AM', 'PM'];
 
-  // Handle form field changes
   const handleChange = (name, value) => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  // Handle time changes
   const handleTimeChange = (type, value) => {
     setFormData(prev => ({
       ...prev,
@@ -72,7 +65,6 @@ const ReservationForm = ({ route }) => {
     }));
   };
 
-  // Toggle AM/PM
   const toggleAMPM = () => {
     setFormData(prev => ({
       ...prev,
@@ -80,7 +72,6 @@ const ReservationForm = ({ route }) => {
     }));
   };
 
-  // Load existing reservation if ID is provided
   useEffect(() => {
     if (route?.params?.reservationId) {
       fetch(`${backendUrl}/api/reservations/${route.params.reservationId}`)
@@ -109,7 +100,6 @@ const ReservationForm = ({ route }) => {
     }
   }, [route?.params?.reservationId]);
 
-  // Helper function to parse time string
   const parseTimeString = (timeStr) => {
     const [timePart, ampm] = timeStr.split(' ');
     const [hour, minute] = timePart.split(':');
@@ -120,11 +110,9 @@ const ReservationForm = ({ route }) => {
     };
   };
 
-  // Submit reservation with enhanced error handling
   const handleSubmit = async () => {
     setIsSubmitting(true);
     try {
-      // Validate required fields
       if (!formData.name || !formData.email || !formData.date) {
         throw new Error('Please fill in all required fields');
       }
@@ -133,9 +121,6 @@ const ReservationForm = ({ route }) => {
         ...formData,
         time: `${formData.time.hour}:${String(formData.time.minute).padStart(2, '0')} ${formData.time.ampm}`
       };
-
-      console.log("Submitting to:", `${backendUrl}/api/reservations`);
-      console.log("Payload:", JSON.stringify(reservation, null, 2));
 
       const response = await fetch(`${backendUrl}/api/reservations`, {
         method: 'POST',
@@ -146,17 +131,12 @@ const ReservationForm = ({ route }) => {
         body: JSON.stringify(reservation)
       });
 
-      console.log("Response status:", response.status);
-
-      // Handle non-JSON responses
       if (response.status === 500) {
         const errorText = await response.text();
-        console.error("Server error details:", errorText);
         throw new Error("Server encountered an error. Please try again later.");
       }
 
       const responseData = await response.json();
-      console.log("Response data:", responseData);
 
       if (!response.ok) {
         throw new Error(responseData.message || `Server returned status ${response.status}`);
@@ -168,7 +148,6 @@ const ReservationForm = ({ route }) => {
         [{ 
           text: "OK",
           onPress: () => {
-            // Reset form after successful submission
             setFormData({
               name: '',
               email: '',

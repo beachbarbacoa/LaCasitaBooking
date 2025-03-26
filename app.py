@@ -10,15 +10,12 @@ from email.mime.multipart import MIMEMultipart
 from threading import Thread
 from datetime import datetime
 
-# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
-# Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Database configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///reservations.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -39,7 +36,6 @@ class Reservation(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-# Email configuration
 app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.sendgrid.net')
 app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
 app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'true').lower() == 'true'
@@ -47,15 +43,12 @@ app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
 app.config['SENDER_EMAIL'] = os.getenv('SENDER_EMAIL', 'no-reply@reservations.com')
 
-# Telegram setup
 telegram_bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
 telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')
 
-# State management
 pending_denials = {}
 
 def send_email_async(app_context, subject, recipient, body):
-    """Non-blocking email sender with app context"""
     def send_email():
         with app_context:
             try:
@@ -76,7 +69,6 @@ def send_email_async(app_context, subject, recipient, body):
     Thread(target=send_email).start()
 
 def send_telegram_async(app_context, reservation):
-    """Non-blocking Telegram sender with app context"""
     def send_telegram():
         with app_context:
             try:
@@ -117,7 +109,6 @@ Status: {reservation.status}"""
     Thread(target=send_telegram).start()
 
 def update_telegram_message(reservation_id, new_text, new_markup=None):
-    """Update the original Telegram message to show status"""
     try:
         reservation = Reservation.query.get(reservation_id)
         if not reservation or not reservation.telegram_message_id:
@@ -143,9 +134,7 @@ def update_telegram_message(reservation_id, new_text, new_markup=None):
 
 @app.route("/api/reservations", methods=["POST"])
 def create_reservation():
-    """Create reservation endpoint with async notifications"""
     try:
-        # Ensure request contains JSON
         if not request.is_json:
             logger.error("Request is not JSON")
             return jsonify({
@@ -156,7 +145,6 @@ def create_reservation():
         data = request.get_json()
         logger.debug(f"New reservation: {data}")
 
-        # Validate input
         required_fields = ["name", "email", "phone", "time", "date", "diners", "seating", "pickup"]
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
@@ -167,7 +155,6 @@ def create_reservation():
                 "missing_fields": missing_fields
             }), 400
 
-        # Validate date format
         try:
             datetime.strptime(data["date"], "%Y-%m-%d")
         except ValueError:
@@ -177,7 +164,6 @@ def create_reservation():
                 "message": "Invalid date format. Use YYYY-MM-DD"
             }), 400
 
-        # Create reservation
         reservation = Reservation(
             name=data["name"],
             email=data["email"],
@@ -193,10 +179,8 @@ def create_reservation():
         db.session.commit()
         logger.info(f"Created reservation ID: {reservation.id}")
 
-        # Create application context for background tasks
         app_context = app.app_context()
 
-        # Start async notifications with proper context
         send_telegram_async(app_context, reservation)
         send_email_async(
             app_context,
@@ -229,7 +213,6 @@ def create_reservation():
 
 @app.route("/api/reservations/<int:reservation_id>", methods=["GET"])
 def get_reservation(reservation_id):
-    """Get reservation details"""
     try:
         reservation = Reservation.query.get_or_404(reservation_id)
         return jsonify({
@@ -258,7 +241,6 @@ def get_reservation(reservation_id):
 
 @app.route("/api/telegram-callback", methods=["POST"])
 def telegram_callback():
-    """Handle Telegram interactions"""
     try:
         data = request.json
         logger.debug(f"Telegram callback: {data}")
@@ -279,12 +261,18 @@ def telegram_callback():
                 db.session.commit()
                 logger.info(f"Reservation {reservation_id} confirmed")
                 
-                # Update original message
                 original_text = callback["message"]["text"]
                 update_telegram_message(
                     reservation_id,
                     f"✅ ACCEPTED\n{original_text}",
-                    {"inline_keyboard": [[{"text": "✓ Accepted", "callback_data": "already_processed"}]]}
+                    {
+                        "inline_keyboard": [
+                            [
+                                {"text": "✓ Accepted", "callback_data": "already_processed"},
+                                {"text": "✗ Deny", "callback_data": "already_processed", "disabled": True}
+                            ]
+                        ]
+                    }
                 )
                 
                 app_context = app.app_context()
@@ -301,12 +289,18 @@ def telegram_callback():
                 pending_denials[str(callback["message"]["chat"]["id"])] = reservation_id
                 logger.info(f"Processing denial for reservation {reservation_id}")
                 
-                # Update original message
                 original_text = callback["message"]["text"]
                 update_telegram_message(
                     reservation_id,
                     f"🔄 PROCESSING DENIAL\n{original_text}",
-                    {"inline_keyboard": [[{"text": "Processing...", "callback_data": "already_processing"}]]}
+                    {
+                        "inline_keyboard": [
+                            [
+                                {"text": "✓ Accept", "callback_data": "already_processing", "disabled": True},
+                                {"text": "✗ Denying...", "callback_data": "already_processing"}
+                            ]
+                        ]
+                    }
                 )
                 
                 requests.post(
@@ -333,12 +327,18 @@ def telegram_callback():
                     db.session.commit()
                     logger.info(f"Reservation {reservation.id} denied with reason: {reason}")
                     
-                    # Update original message
                     original_text = data["message"]["reply_to_message"]["text"].replace("🔄 PROCESSING DENIAL\n", "")
                     update_telegram_message(
                         reservation.id,
                         f"❌ DENIED\n{original_text}\nReason: {reason}",
-                        {"inline_keyboard": [[{"text": "✗ Denied", "callback_data": "already_processed"}]]}
+                        {
+                            "inline_keyboard": [
+                                [
+                                    {"text": "✓ Accept", "callback_data": "already_processed", "disabled": True},
+                                    {"text": "✗ Denied", "callback_data": "already_processed"}
+                                ]
+                            ]
+                        }
                     )
                     
                     frontend_url = os.getenv('FRONTEND_URL', f"exp://127.0.0.1:19000/--/reservation?reservation_id={reservation.id}")
@@ -367,7 +367,6 @@ Or copy this link to your phone: {frontend_url}"""
 
 @app.route("/api/reservations", methods=["GET"])
 def list_reservations():
-    """List all reservations (for admin/concierge portal)"""
     try:
         reservations = Reservation.query.order_by(Reservation.date, Reservation.time).all()
         return jsonify({
@@ -394,7 +393,6 @@ def list_reservations():
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def catch_all(path):
-    """Catch-all route for undefined endpoints"""
     return jsonify({
         "status": "error",
         "message": "Endpoint not found",
@@ -408,9 +406,7 @@ def catch_all(path):
 
 @app.route("/test", methods=["GET"])
 def test_endpoint():
-    """Health check endpoint"""
     try:
-        # Test database connection
         db.session.execute("SELECT 1")
         return jsonify({
             "status": "running",
@@ -426,7 +422,6 @@ def test_endpoint():
             "error": str(e)
         }), 500
 
-# Initialize database
 with app.app_context():
     try:
         db.create_all()
