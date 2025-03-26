@@ -24,7 +24,9 @@ const ReservationForm = ({ route }) => {
     pickup: 'no'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const backendUrl = "https://lacasitabooking.onrender.com"; // REPLACE WITH YOUR ACTUAL RENDER URL
+  
+  // REPLACE THIS WITH YOUR ACTUAL RENDER URL
+  const backendUrl = "https://your-render-service-name.onrender.com"; 
 
   // Date picker logic
   const today = new Date();
@@ -133,7 +135,7 @@ const ReservationForm = ({ route }) => {
       };
 
       console.log("Submitting to:", `${backendUrl}/api/reservations`);
-      console.log("Data:", JSON.stringify(reservation, null, 2));
+      console.log("Payload:", JSON.stringify(reservation, null, 2));
 
       const response = await fetch(`${backendUrl}/api/reservations`, {
         method: 'POST',
@@ -144,53 +146,50 @@ const ReservationForm = ({ route }) => {
         body: JSON.stringify(reservation)
       });
 
-      // Handle 404 specifically
-      if (response.status === 404) {
-        throw new Error('Server endpoint not found. Please check the backend URL.');
+      console.log("Response status:", response.status);
+
+      // Handle non-JSON responses
+      if (response.status === 500) {
+        const errorText = await response.text();
+        console.error("Server error details:", errorText);
+        throw new Error("Server encountered an error. Please try again later.");
       }
 
-      // Handle response
-      let responseData;
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        responseData = await response.json();
-      } else {
-        const textResponse = await response.text();
-        throw new Error(textResponse || 'Invalid server response');
-      }
+      const responseData = await response.json();
+      console.log("Response data:", responseData);
 
       if (!response.ok) {
-        throw new Error(responseData.message || `Server error: ${response.status}`);
+        throw new Error(responseData.message || `Server returned status ${response.status}`);
       }
 
       Alert.alert(
         "Success",
         responseData.message || "Reservation submitted successfully!",
-        [{ text: "OK", onPress: () => {
-          // Reset form after successful submission
-          setFormData({
-            name: '',
-            email: '',
-            phone: '',
-            date: '',
-            time: { hour: 7, minute: 0, ampm: 'PM' },
-            diners: '1',
-            seating: 'inside',
-            pickup: 'no'
-          });
-        }}]
+        [{ 
+          text: "OK",
+          onPress: () => {
+            // Reset form after successful submission
+            setFormData({
+              name: '',
+              email: '',
+              phone: '',
+              date: '',
+              time: { hour: 7, minute: 0, ampm: 'PM' },
+              diners: '1',
+              seating: 'inside',
+              pickup: 'no'
+            });
+          }
+        }]
       );
+      
     } catch (error) {
-      let errorMessage = error.message;
-      if (error.message.includes('Failed to fetch')) {
-        errorMessage = "Could not connect to server. Please check your internet connection.";
-      }
+      console.error("Full error:", error);
       Alert.alert(
         "Error",
-        errorMessage || "An error occurred. Please try again.",
+        error.message || "An unexpected error occurred",
         [{ text: "OK" }]
       );
-      console.error("Submission error:", error);
     } finally {
       setIsSubmitting(false);
     }

@@ -10,6 +10,7 @@ from email.mime.multipart import MIMEMultipart
 from threading import Thread
 from datetime import datetime
 
+# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
@@ -146,6 +147,7 @@ def create_reservation():
     try:
         # Ensure request contains JSON
         if not request.is_json:
+            logger.error("Request is not JSON")
             return jsonify({
                 "status": "error",
                 "message": "Request must be JSON"
@@ -158,6 +160,7 @@ def create_reservation():
         required_fields = ["name", "email", "phone", "time", "date", "diners", "seating", "pickup"]
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
+            logger.error(f"Missing fields: {missing_fields}")
             return jsonify({
                 "status": "error",
                 "message": f"Missing required fields: {', '.join(missing_fields)}",
@@ -168,6 +171,7 @@ def create_reservation():
         try:
             datetime.strptime(data["date"], "%Y-%m-%d")
         except ValueError:
+            logger.error("Invalid date format")
             return jsonify({
                 "status": "error",
                 "message": "Invalid date format. Use YYYY-MM-DD"
@@ -187,6 +191,7 @@ def create_reservation():
         
         db.session.add(reservation)
         db.session.commit()
+        logger.info(f"Created reservation ID: {reservation.id}")
 
         # Create application context for background tasks
         app_context = app.app_context()
@@ -215,7 +220,7 @@ def create_reservation():
         }), 201
 
     except Exception as e:
-        logger.error(f"Reservation failed: {str(e)}")
+        logger.error(f"Reservation failed: {str(e)}", exc_info=True)
         db.session.rollback()
         return jsonify({
             "status": "error",
@@ -266,11 +271,13 @@ def telegram_callback():
             
             reservation = Reservation.query.get(reservation_id)
             if not reservation:
+                logger.error(f"Reservation not found: {reservation_id}")
                 abort(404, "Reservation not found")
 
             if callback_data.startswith("accept"):
                 reservation.status = "Confirmed"
                 db.session.commit()
+                logger.info(f"Reservation {reservation_id} confirmed")
                 
                 # Update original message
                 original_text = callback["message"]["text"]
@@ -292,6 +299,7 @@ def telegram_callback():
 
             elif callback_data.startswith("deny"):
                 pending_denials[str(callback["message"]["chat"]["id"])] = reservation_id
+                logger.info(f"Processing denial for reservation {reservation_id}")
                 
                 # Update original message
                 original_text = callback["message"]["text"]
@@ -323,6 +331,7 @@ def telegram_callback():
                     reservation.denial_reason = reason
                     reservation.status = "Denied"
                     db.session.commit()
+                    logger.info(f"Reservation {reservation.id} denied with reason: {reason}")
                     
                     # Update original message
                     original_text = data["message"]["reply_to_message"]["text"].replace("🔄 PROCESSING DENIAL\n", "")
@@ -350,7 +359,7 @@ Or copy this link to your phone: {frontend_url}"""
         return jsonify({"status": "ignored"}), 200
 
     except Exception as e:
-        logger.error(f"Callback error: {str(e)}")
+        logger.error(f"Callback error: {str(e)}", exc_info=True)
         return jsonify({
             "status": "error",
             "message": "Internal server error"
@@ -392,24 +401,39 @@ def catch_all(path):
         "valid_endpoints": [
             "/api/reservations",
             "/api/reservations/<id>",
-            "/api/telegram-callback"
+            "/api/telegram-callback",
+            "/test"
         ]
     }), 404
 
 @app.route("/test", methods=["GET"])
 def test_endpoint():
     """Health check endpoint"""
-    return jsonify({
-        "status": "running",
-        "service": "Reservation System",
-        "timestamp": datetime.utcnow().isoformat(),
-        "database": "connected" if db.session.execute("SELECT 1").scalar() else "disconnected"
-    })
+    try:
+        # Test database connection
+        db.session.execute("SELECT 1")
+        return jsonify({
+            "status": "running",
+            "service": "Reservation System",
+            "timestamp": datetime.utcnow().isoformat(),
+            "database": "connected"
+        })
+    except Exception as e:
+        logger.error(f"Database connection failed: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "database": "disconnected",
+            "error": str(e)
+        }), 500
 
 # Initialize database
 with app.app_context():
-    db.create_all()
+    try:
+        db.create_all()
+        logger.info("Database tables created successfully")
+    except Exception as e:
+        logger.error(f"Database creation error: {str(e)}")
 
 if __name__ == "__main__":
-    port = int(os.getenv('PORT', 8080))
+    port = int(os.getenv("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
