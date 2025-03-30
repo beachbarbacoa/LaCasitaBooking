@@ -261,7 +261,7 @@ def telegram_callback():
                     {
                         "inline_keyboard": [
                             [
-                                {"text": "✓ Accepted", "callback_data": "already_processed"},
+                                {"text": "✓ Accepted", "callback_data": "already_processed", "disabled": True},
                                 {"text": "✗ Deny", "callback_data": "already_processed", "disabled": True}
                             ]
                         ]
@@ -287,7 +287,7 @@ def telegram_callback():
                         "inline_keyboard": [
                             [
                                 {"text": "✓ Accept", "callback_data": "already_processing", "disabled": True},
-                                {"text": "✗ Processing...", "callback_data": "already_processing"}
+                                {"text": "✗ Processing...", "callback_data": "already_processing", "disabled": True}
                             ]
                         ]
                     }
@@ -324,7 +324,7 @@ def telegram_callback():
                             "inline_keyboard": [
                                 [
                                     {"text": "✓ Accept", "callback_data": "already_processed", "disabled": True},
-                                    {"text": "✗ Denied", "callback_data": "already_processed"}
+                                    {"text": "✗ Denied", "callback_data": "already_processed", "disabled": True}
                                 ]
                             ]
                         }
