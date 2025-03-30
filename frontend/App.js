@@ -1,18 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  TextInput, 
-  Button, 
-  StyleSheet, 
-  Alert,
-  ScrollView,
-  TouchableOpacity,
-  FlatList
-} from 'react-native';
+import { View, Text, TextInput, Button, StyleSheet, Alert, ScrollView, TouchableOpacity, FlatList } from 'react-native';
 
 const ReservationForm = ({ route }) => {
-  // State for form data
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -24,8 +13,6 @@ const ReservationForm = ({ route }) => {
     pickup: 'no'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
-  // Updated with your Render server address
   const backendUrl = "https://lacasitabooking.onrender.com";
 
   // Date picker logic
@@ -130,12 +117,15 @@ const ReservationForm = ({ route }) => {
       }
 
       const reservation = {
-        ...formData,
-        time: `${formData.time.hour}:${String(formData.time.minute).padStart(2, '0')} ${formData.time.ampm}`
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        date: formData.date,
+        time: `${formData.time.hour}:${String(formData.time.minute).padStart(2, '0')} ${formData.time.ampm}`,
+        diners: parseInt(formData.diners),
+        seating: formData.seating,
+        pickup: formData.pickup
       };
-
-      console.log("Submitting to:", `${backendUrl}/api/reservations`);
-      console.log("Payload:", JSON.stringify(reservation, null, 2));
 
       const response = await fetch(`${backendUrl}/api/reservations`, {
         method: 'POST',
@@ -146,29 +136,18 @@ const ReservationForm = ({ route }) => {
         body: JSON.stringify(reservation)
       });
 
-      console.log("Response status:", response.status);
-
-      // Handle non-JSON responses
-      if (response.status === 500) {
-        const errorText = await response.text();
-        console.error("Server error details:", errorText);
-        throw new Error("Server encountered an error. Please try again later.");
-      }
-
       const responseData = await response.json();
-      console.log("Response data:", responseData);
-
+      
       if (!response.ok) {
-        throw new Error(responseData.message || `Server returned status ${response.status}`);
+        throw new Error(responseData.message || `Server error: ${response.status}`);
       }
 
       Alert.alert(
-        "Success",
-        responseData.message || "Reservation submitted successfully!",
-        [{ 
+        "Success", 
+        "Reservation submitted successfully!",
+        [{
           text: "OK",
           onPress: () => {
-            // Reset form after successful submission
             setFormData({
               name: '',
               email: '',
@@ -184,10 +163,10 @@ const ReservationForm = ({ route }) => {
       );
       
     } catch (error) {
-      console.error("Full error:", error);
+      console.error("Submission error:", error);
       Alert.alert(
         "Error",
-        error.message || "An unexpected error occurred",
+        error.message || "Failed to submit reservation",
         [{ text: "OK" }]
       );
     } finally {
