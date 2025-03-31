@@ -1,3 +1,4 @@
+# TELEGRAM UPDATE - 2024-03-31
 from flask import Flask, jsonify, request, abort
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -24,7 +25,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 class Reservation(db.Model):
-    __tablename__ = 'reservation'
+    __tablename__ = 'reservation'  # Explicit table name to match your database
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(100), nullable=False)
@@ -34,11 +35,12 @@ class Reservation(db.Model):
     diners = db.Column(db.Integer, nullable=False)
     seating = db.Column(db.String(20), nullable=False)
     pickup = db.Column(db.String(10), nullable=False)
-    status = db.Column(db.String(20), default="Pending")
-    denial_reason = db.Column(db.String(200))
-    telegram_message_id = db.Column(db.String(50))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # These columns are now marked as nullable to work with existing DB
+    status = db.Column(db.String(20), default="Pending", nullable=True)
+    denial_reason = db.Column(db.String(200), nullable=True)
+    telegram_message_id = db.Column(db.String(50), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
 
 # Email configuration
 app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.sendgrid.net')
@@ -90,7 +92,7 @@ Time: {reservation.time}
 Diners: {reservation.diners}
 Seating: {reservation.seating}
 Pickup: {reservation.pickup}
-Status: {reservation.status}"""
+Status: {getattr(reservation, 'status', 'Pending')}"""  # Safe access to status
 
                 response = requests.post(
                     f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
@@ -108,10 +110,14 @@ Status: {reservation.status}"""
                     },
                     timeout=10
                 )
-                response_data = response.json()
                 if response.ok:
-                    reservation.telegram_message_id = str(response_data['result']['message_id'])
-                    db.session.commit()
+                    response_data = response.json()
+                    if hasattr(reservation, 'telegram_message_id'):
+                        reservation.telegram_message_id = str(response_data['result']['message_id'])
+                        try:
+                            db.session.commit()
+                        except Exception as db_error:
+                            logger.error(f"DB commit error: {str(db_error)}")
                 response.raise_for_status()
             except Exception as e:
                 logger.error(f"Telegram failed: {str(e)}")
@@ -121,7 +127,7 @@ def update_telegram_message(reservation_id, new_text, new_markup=None):
     """Update existing Telegram message with new text/buttons"""
     try:
         reservation = Reservation.query.get(reservation_id)
-        if not reservation or not reservation.telegram_message_id:
+        if not reservation or not hasattr(reservation, 'telegram_message_id') or not reservation.telegram_message_id:
             return
 
         payload = {
@@ -163,7 +169,7 @@ def create_reservation():
         except ValueError:
             abort(400, "Invalid date format. Use YYYY-MM-DD")
 
-        # Create reservation
+        # Create reservation with only the essential fields
         reservation = Reservation(
             name=data["name"],
             email=data["email"],
@@ -175,6 +181,14 @@ def create_reservation():
             pickup=data["pickup"]
         )
         
+        # Only set optional fields if they exist in the model
+        if hasattr(Reservation, 'status'):
+            reservation.status = "Pending"
+        if hasattr(Reservation, 'denial_reason'):
+            reservation.denial_reason = None
+        if hasattr(Reservation, 'telegram_message_id'):
+            reservation.telegram_message_id = None
+
         db.session.add(reservation)
         db.session.commit()
 
@@ -209,22 +223,30 @@ def get_reservation(reservation_id):
     """Get reservation details"""
     try:
         reservation = Reservation.query.get_or_404(reservation_id)
+        response_data = {
+            "name": reservation.name,
+            "email": reservation.email,
+            "phone": reservation.phone,
+            "date": reservation.date,
+            "time": reservation.time,
+            "diners": reservation.diners,
+            "seating": reservation.seating,
+            "pickup": reservation.pickup
+        }
+        
+        # Only include optional fields if they exist
+        if hasattr(reservation, 'status'):
+            response_data["status"] = reservation.status
+        if hasattr(reservation, 'denial_reason'):
+            response_data["denial_reason"] = reservation.denial_reason
+        if hasattr(reservation, 'created_at'):
+            response_data["created_at"] = reservation.created_at.isoformat()
+        if hasattr(reservation, 'updated_at'):
+            response_data["updated_at"] = reservation.updated_at.isoformat()
+
         return jsonify({
             "status": "success",
-            "data": {
-                "name": reservation.name,
-                "email": reservation.email,
-                "phone": reservation.phone,
-                "date": reservation.date,
-                "time": reservation.time,
-                "diners": reservation.diners,
-                "seating": reservation.seating,
-                "pickup": reservation.pickup,
-                "status": reservation.status,
-                "denial_reason": reservation.denial_reason,
-                "created_at": reservation.created_at.isoformat(),
-                "updated_at": reservation.updated_at.isoformat()
-            }
+            "data": response_data
         })
     except Exception as e:
         logger.error(f"Failed to get reservation: {str(e)}")
@@ -253,7 +275,8 @@ def telegram_callback():
             original_text = callback["message"]["text"]
 
             if callback_data.startswith("accept"):
-                reservation.status = "Confirmed"
+                if hasattr(reservation, 'status'):
+                    reservation.status = "Confirmed"
                 db.session.commit()
                 
                 update_telegram_message(
@@ -313,8 +336,10 @@ def telegram_callback():
                 reservation = Reservation.query.get(pending_denials[chat_id])
                 if reservation:
                     reason = message.get("text", "No reason provided")
-                    reservation.denial_reason = reason
-                    reservation.status = "Denied"
+                    if hasattr(reservation, 'denial_reason'):
+                        reservation.denial_reason = reason
+                    if hasattr(reservation, 'status'):
+                        reservation.status = "Denied"
                     db.session.commit()
                     
                     original_text = data["message"]["reply_to_message"]["text"].replace("🔄 PROCESSING DENIAL\n", "")
@@ -356,19 +381,23 @@ def list_reservations():
     """List all reservations"""
     try:
         reservations = Reservation.query.order_by(Reservation.date, Reservation.time).all()
+        reservations_data = []
+        for r in reservations:
+            res_data = {
+                "id": r.id,
+                "name": r.name,
+                "date": r.date,
+                "time": r.time,
+                "diners": r.diners
+            }
+            if hasattr(r, 'status'):
+                res_data["status"] = r.status
+            reservations_data.append(res_data)
+
         return jsonify({
             "status": "success",
             "count": len(reservations),
-            "data": [
-                {
-                    "id": r.id,
-                    "name": r.name,
-                    "date": r.date,
-                    "time": r.time,
-                    "status": r.status,
-                    "diners": r.diners
-                } for r in reservations
-            ]
+            "data": reservations_data
         })
     except Exception as e:
         logger.error(f"Failed to list reservations: {str(e)}")
@@ -415,9 +444,10 @@ def test_endpoint():
 with app.app_context():
     try:
         db.create_all()
-        logger.info("Database tables created successfully")
+        logger.info("Database tables checked")
     except Exception as e:
-        logger.error(f"Database creation error: {str(e)}")
+        logger.error(f"Database initialization error: {str(e)}")
+        # Continue even if some columns couldn't be created
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
