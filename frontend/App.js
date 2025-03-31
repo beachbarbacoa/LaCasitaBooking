@@ -79,14 +79,14 @@ const ReservationForm = ({ route }) => {
         })
         .then(data => {
           setFormData({
-            name: data.name,
-            email: data.email,
-            phone: data.phone,
-            date: data.date,
-            time: parseTimeString(data.time),
-            diners: data.diners.toString(),
-            seating: data.seating,
-            pickup: data.pickup
+            name: data.data.name,
+            email: data.data.email,
+            phone: data.data.phone,
+            date: data.data.date,
+            time: parseTimeString(data.data.time),
+            diners: data.data.diners.toString(),
+            seating: data.data.seating,
+            pickup: data.data.pickup
           });
         })
         .catch(error => {
