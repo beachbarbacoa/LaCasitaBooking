@@ -1,4 +1,4 @@
-# TELEGRAM UPDATE - 2024-04-01 (COMPLETE VERSION)
+# TELEGRAM UPDATE - 2024-04-01 (FIXED VERSION)
 from flask import Flask, jsonify, request, abort
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -11,7 +11,6 @@ from email.mime.multipart import MIMEMultipart
 from threading import Thread
 from datetime import datetime
 
-# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
@@ -19,7 +18,7 @@ CORS(app)
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Database configuration - PostgreSQL
+# Database configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql:///reservations')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -86,8 +85,7 @@ Date: {reservation.date}
 Time: {reservation.time}
 Diners: {reservation.diners}
 Seating: {reservation.seating}
-Pickup: {reservation.pickup}
-Status: {reservation.status}"""
+Pickup: {reservation.pickup}"""
 
                 response = requests.post(
                     f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
@@ -109,7 +107,9 @@ Status: {reservation.status}"""
                 if response.ok:
                     response_data = response.json()
                     telegram_message_store[reservation.id] = str(response_data['result']['message_id'])
-                response.raise_for_status()
+                    logger.info(f"Telegram message stored: {reservation.id}")
+                else:
+                    logger.error(f"Telegram send failed: {response.text}")
             except Exception as e:
                 logger.error(f"Telegram failed: {str(e)}")
     Thread(target=send_telegram).start()
@@ -118,6 +118,7 @@ def update_telegram_message(reservation_id, new_text, new_markup=None):
     try:
         message_id = telegram_message_store.get(reservation_id)
         if not message_id:
+            logger.error(f"No message ID found for reservation {reservation_id}")
             return
 
         payload = {
@@ -135,6 +136,7 @@ def update_telegram_message(reservation_id, new_text, new_markup=None):
             timeout=5
         )
         response.raise_for_status()
+        logger.info(f"Telegram message updated: {reservation_id}")
     except Exception as e:
         logger.error(f"Failed to update Telegram message: {str(e)}")
 
@@ -164,8 +166,7 @@ def create_reservation():
             date=data["date"],
             diners=int(data["diners"]),
             seating=data["seating"],
-            pickup=data["pickup"],
-            status="Pending"
+            pickup=data["pickup"]
         )
 
         db.session.add(reservation)
@@ -196,44 +197,25 @@ def create_reservation():
             "message": "Internal server error"
         }), 500
 
-@app.route("/api/reservations/<int:reservation_id>", methods=["GET"])
-def get_reservation(reservation_id):
-    try:
-        reservation = Reservation.query.get_or_404(reservation_id)
-        return jsonify({
-            "status": "success",
-            "data": {
-                "name": reservation.name,
-                "email": reservation.email,
-                "phone": reservation.phone,
-                "date": reservation.date,
-                "time": reservation.time,
-                "diners": reservation.diners,
-                "seating": reservation.seating,
-                "pickup": reservation.pickup,
-                "status": reservation.status,
-                "denial_reason": reservation.denial_reason,
-                "created_at": reservation.created_at.isoformat() if reservation.created_at else None,
-                "updated_at": reservation.updated_at.isoformat() if reservation.updated_at else None
-            }
-        })
-    except Exception as e:
-        logger.error(f"Failed to get reservation: {str(e)}")
-        return jsonify({
-            "status": "error",
-            "message": "Reservation not found"
-        }), 404
-
 @app.route("/api/telegram-callback", methods=["POST"])
 def telegram_callback():
     try:
         data = request.json
+        if not data:
+            logger.error("Empty Telegram callback received")
+            return jsonify({"status": "error", "message": "Empty data"}), 400
+
         logger.debug(f"Telegram callback: {data}")
 
         if "callback_query" in data:
             callback = data["callback_query"]
             callback_data = callback["data"]
-            reservation_id = int(callback_data.split("_")[1])
+            
+            try:
+                reservation_id = int(callback_data.split("_")[1])
+            except (IndexError, ValueError):
+                logger.error(f"Invalid callback data: {callback_data}")
+                return jsonify({"status": "error", "message": "Invalid callback data"}), 400
             
             reservation = Reservation.query.get(reservation_id)
             if not reservation:
@@ -360,6 +342,32 @@ def telegram_callback():
             "status": "error",
             "message": "Internal server error"
         }), 500
+
+@app.route("/api/reservations/<int:reservation_id>", methods=["GET"])
+def get_reservation(reservation_id):
+    try:
+        reservation = Reservation.query.get_or_404(reservation_id)
+        return jsonify({
+            "status": "success",
+            "data": {
+                "name": reservation.name,
+                "email": reservation.email,
+                "phone": reservation.phone,
+                "date": reservation.date,
+                "time": reservation.time,
+                "diners": reservation.diners,
+                "seating": reservation.seating,
+                "pickup": reservation.pickup,
+                "status": reservation.status,
+                "denial_reason": reservation.denial_reason
+            }
+        })
+    except Exception as e:
+        logger.error(f"Failed to get reservation: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "Reservation not found"
+        }), 404
 
 @app.route("/api/reservations", methods=["GET"])
 def list_reservations():
