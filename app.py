@@ -35,11 +35,11 @@ class Reservation(db.Model):
     diners = db.Column(db.Integer, nullable=False)
     seating = db.Column(db.String(20), nullable=False)
     pickup = db.Column(db.String(10), nullable=False)
+    # These are optional fields that may or may not exist in the database
     status = db.Column(db.String(20), default="Pending", nullable=True)
     denial_reason = db.Column(db.String(200), nullable=True)
-    telegram_message_id = db.Column(db.String(50), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=True)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
+    # We'll store telegram_message_id separately since the column doesn't exist
+    telegram_message_id = None  # This won't be saved to the database
 
 # Email configuration
 app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.sendgrid.net')
@@ -55,6 +55,7 @@ telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')
 
 # State management
 pending_denials = {}
+telegram_message_store = {}  # We'll store telegram message IDs here temporarily
 
 def send_email_async(app_context, subject, recipient, body):
     """Send email in background thread"""
@@ -91,7 +92,7 @@ Time: {reservation.time}
 Diners: {reservation.diners}
 Seating: {reservation.seating}
 Pickup: {reservation.pickup}
-Status: {reservation.status}"""
+Status: {getattr(reservation, 'status', 'Pending')}"""
 
                 response = requests.post(
                     f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
@@ -112,9 +113,8 @@ Status: {reservation.status}"""
                 
                 if response.ok:
                     response_data = response.json()
-                    if hasattr(reservation, 'telegram_message_id'):
-                        reservation.telegram_message_id = str(response_data['result']['message_id'])
-                        db.session.commit()
+                    # Store the message ID in memory instead of the database
+                    telegram_message_store[reservation.id] = str(response_data['result']['message_id'])
                 response.raise_for_status()
             except Exception as e:
                 logger.error(f"Telegram failed: {str(e)}")
@@ -123,13 +123,13 @@ Status: {reservation.status}"""
 def update_telegram_message(reservation_id, new_text, new_markup=None):
     """Update existing Telegram message with new text/buttons"""
     try:
-        reservation = Reservation.query.get(reservation_id)
-        if not reservation or not reservation.telegram_message_id:
+        message_id = telegram_message_store.get(reservation_id)
+        if not message_id:
             return
 
         payload = {
             "chat_id": telegram_chat_id,
-            "message_id": reservation.telegram_message_id,
+            "message_id": message_id,
             "text": new_text
         }
         
@@ -166,7 +166,7 @@ def create_reservation():
         except ValueError:
             abort(400, "Invalid date format. Use YYYY-MM-DD")
 
-        # Create reservation
+        # Create reservation with only the essential fields
         reservation = Reservation(
             name=data["name"],
             email=data["email"],
@@ -175,9 +175,7 @@ def create_reservation():
             date=data["date"],
             diners=int(data["diners"]),
             seating=data["seating"],
-            pickup=data["pickup"],
-            status="Pending",
-            telegram_message_id=None
+            pickup=data["pickup"]
         )
 
         db.session.add(reservation)
@@ -214,22 +212,30 @@ def get_reservation(reservation_id):
     """Get reservation details"""
     try:
         reservation = Reservation.query.get_or_404(reservation_id)
+        response_data = {
+            "name": reservation.name,
+            "email": reservation.email,
+            "phone": reservation.phone,
+            "date": reservation.date,
+            "time": reservation.time,
+            "diners": reservation.diners,
+            "seating": reservation.seating,
+            "pickup": reservation.pickup
+        }
+        
+        # Only include optional fields if they exist
+        if hasattr(reservation, 'status'):
+            response_data["status"] = reservation.status
+        if hasattr(reservation, 'denial_reason'):
+            response_data["denial_reason"] = reservation.denial_reason
+        if hasattr(reservation, 'created_at'):
+            response_data["created_at"] = reservation.created_at.isoformat()
+        if hasattr(reservation, 'updated_at'):
+            response_data["updated_at"] = reservation.updated_at.isoformat()
+
         return jsonify({
             "status": "success",
-            "data": {
-                "name": reservation.name,
-                "email": reservation.email,
-                "phone": reservation.phone,
-                "date": reservation.date,
-                "time": reservation.time,
-                "diners": reservation.diners,
-                "seating": reservation.seating,
-                "pickup": reservation.pickup,
-                "status": reservation.status,
-                "denial_reason": reservation.denial_reason,
-                "created_at": reservation.created_at.isoformat() if reservation.created_at else None,
-                "updated_at": reservation.updated_at.isoformat() if reservation.updated_at else None
-            }
+            "data": response_data
         })
     except Exception as e:
         logger.error(f"Failed to get reservation: {str(e)}")
@@ -258,7 +264,8 @@ def telegram_callback():
             original_text = callback["message"]["text"]
 
             if callback_data.startswith("accept"):
-                reservation.status = "Confirmed"
+                if hasattr(reservation, 'status'):
+                    reservation.status = "Confirmed"
                 db.session.commit()
                 
                 update_telegram_message(
@@ -318,8 +325,10 @@ def telegram_callback():
                 reservation = Reservation.query.get(pending_denials[chat_id])
                 if reservation:
                     reason = message.get("text", "No reason provided")
-                    reservation.denial_reason = reason
-                    reservation.status = "Denied"
+                    if hasattr(reservation, 'denial_reason'):
+                        reservation.denial_reason = reason
+                    if hasattr(reservation, 'status'):
+                        reservation.status = "Denied"
                     db.session.commit()
                     
                     original_text = data["message"]["reply_to_message"]["text"].replace("🔄 PROCESSING DENIAL\n", "")
@@ -361,17 +370,23 @@ def list_reservations():
     """List all reservations"""
     try:
         reservations = Reservation.query.order_by(Reservation.date, Reservation.time).all()
-        return jsonify({
-            "status": "success",
-            "count": len(reservations),
-            "data": [{
+        reservations_data = []
+        for r in reservations:
+            res_data = {
                 "id": r.id,
                 "name": r.name,
                 "date": r.date,
                 "time": r.time,
-                "diners": r.diners,
-                "status": r.status
-            } for r in reservations]
+                "diners": r.diners
+            }
+            if hasattr(r, 'status'):
+                res_data["status"] = r.status
+            reservations_data.append(res_data)
+
+        return jsonify({
+            "status": "success",
+            "count": len(reservations),
+            "data": reservations_data
         })
     except Exception as e:
         logger.error(f"Failed to list reservations: {str(e)}")
