@@ -1,4 +1,4 @@
-# TELEGRAM UPDATE - 2024-04-01 (FIXED VERSION)
+# TELEGRAM RESERVATION SYSTEM - COMPLETE VERSION (429 lines)
 from flask import Flask, jsonify, request, abort
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -107,9 +107,9 @@ Pickup: {reservation.pickup}"""
                 if response.ok:
                     response_data = response.json()
                     telegram_message_store[reservation.id] = str(response_data['result']['message_id'])
-                    logger.info(f"Telegram message stored: {reservation.id}")
+                    logger.info(f"Telegram message stored for reservation {reservation.id}")
                 else:
-                    logger.error(f"Telegram send failed: {response.text}")
+                    logger.error(f"Telegram API error: {response.text}")
             except Exception as e:
                 logger.error(f"Telegram failed: {str(e)}")
     Thread(target=send_telegram).start()
@@ -136,7 +136,7 @@ def update_telegram_message(reservation_id, new_text, new_markup=None):
             timeout=5
         )
         response.raise_for_status()
-        logger.info(f"Telegram message updated: {reservation_id}")
+        logger.info(f"Telegram message updated for reservation {reservation_id}")
     except Exception as e:
         logger.error(f"Failed to update Telegram message: {str(e)}")
 
@@ -207,13 +207,15 @@ def telegram_callback():
 
         logger.debug(f"Telegram callback: {data}")
 
+        # Handle callback queries (button presses)
         if "callback_query" in data:
             callback = data["callback_query"]
             callback_data = callback["data"]
             
             try:
-                reservation_id = int(callback_data.split("_")[1])
-            except (IndexError, ValueError):
+                action, reservation_id = callback_data.split("_")
+                reservation_id = int(reservation_id)
+            except (ValueError, IndexError):
                 logger.error(f"Invalid callback data: {callback_data}")
                 return jsonify({"status": "error", "message": "Invalid callback data"}), 400
             
@@ -224,10 +226,21 @@ def telegram_callback():
 
             original_text = callback["message"]["text"]
 
-            if callback_data.startswith("accept"):
+            # Immediately answer the callback to prevent timeout
+            requests.post(
+                f"https://api.telegram.org/bot{telegram_bot_token}/answerCallbackQuery",
+                json={
+                    "callback_query_id": callback["id"],
+                    "text": "Processing your request..."
+                }
+            )
+
+            if action == "accept":
+                # Update reservation status
                 reservation.status = "Confirmed"
                 db.session.commit()
                 
+                # Update Telegram message with visual feedback
                 update_telegram_message(
                     reservation_id,
                     f"✅ ACCEPTED\n{original_text}",
@@ -241,26 +254,23 @@ def telegram_callback():
                     }
                 )
                 
+                # Send confirmation email
                 send_email_async(
                     app.app_context(),
                     "Reservation Confirmed",
                     reservation.email,
-                    f"Hello {reservation.name},<br><br>Your reservation for {reservation.date} at {reservation.time} is confirmed!<br><br>We look forward to seeing you."
-                )
-                
-                requests.post(
-                    f"https://api.telegram.org/bot{telegram_bot_token}/answerCallbackQuery",
-                    json={
-                        "callback_query_id": callback["id"],
-                        "text": "Reservation accepted"
-                    }
+                    f"Hello {reservation.name},<br><br>" +
+                    f"Your reservation for {reservation.date} at {reservation.time} is confirmed!<br><br>" +
+                    "We look forward to seeing you."
                 )
                 
                 return jsonify({"status": "confirmed"})
 
-            elif callback_data.startswith("deny"):
+            elif action == "deny":
+                # Store the reservation ID for the denial flow
                 pending_denials[str(callback["message"]["chat"]["id"])] = reservation_id
                 
+                # Update Telegram message to show processing state
                 update_telegram_message(
                     reservation_id,
                     f"🔄 PROCESSING DENIAL\n{original_text}",
@@ -274,14 +284,7 @@ def telegram_callback():
                     }
                 )
                 
-                requests.post(
-                    f"https://api.telegram.org/bot{telegram_bot_token}/answerCallbackQuery",
-                    json={
-                        "callback_query_id": callback["id"],
-                        "text": "Please provide a reason for denial"
-                    }
-                )
-                
+                # Ask for denial reason
                 requests.post(
                     f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
                     json={
@@ -289,12 +292,12 @@ def telegram_callback():
                         "text": "Please provide a reason for denial:",
                         "reply_to_message_id": callback["message"]["message_id"],
                         "reply_markup": {"force_reply": True}
-                    },
-                    timeout=3
+                    }
                 )
                 
                 return jsonify({"status": "awaiting_reason"})
 
+        # Handle denial reason responses
         elif "message" in data and "reply_to_message" in data["message"]:
             message = data["message"]
             chat_id = str(message["chat"]["id"])
@@ -303,11 +306,16 @@ def telegram_callback():
                 reservation = Reservation.query.get(pending_denials[chat_id])
                 if reservation:
                     reason = message.get("text", "No reason provided")
+                    
+                    # Update reservation
                     reservation.denial_reason = reason
                     reservation.status = "Denied"
                     db.session.commit()
                     
+                    # Get the original message text
                     original_text = data["message"]["reply_to_message"]["text"].replace("🔄 PROCESSING DENIAL\n", "")
+                    
+                    # Update the original message with denial status
                     update_telegram_message(
                         reservation.id,
                         f"❌ DENIED\n{original_text}\nReason: {reason}",
@@ -321,6 +329,7 @@ def telegram_callback():
                         }
                     )
                     
+                    # Send denial email
                     send_email_async(
                         app.app_context(),
                         "Reservation Denied",
@@ -331,6 +340,7 @@ def telegram_callback():
                         Please contact us if you have any questions."""
                     )
                     
+                    # Clean up
                     del pending_denials[chat_id]
                     return jsonify({"status": "denied"})
 
