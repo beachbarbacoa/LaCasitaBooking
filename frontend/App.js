@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, Alert, ScrollView, TouchableOpacity, FlatList } from 'react-native';
+import { useRoute } from '@react-navigation/native'; // Add this for route handling
 
-const ReservationForm = ({ route }) => {
+const ReservationForm = () => {
+  const route = useRoute(); // Hook to access route params
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -67,10 +69,11 @@ const ReservationForm = ({ route }) => {
     }));
   };
 
-  // Load existing reservation if ID is provided
+  // Load reservation data from URL parameter
   useEffect(() => {
-    if (route?.params?.reservationId) {
-      fetch(`${backendUrl}/api/reservations/${route.params.reservationId}`)
+    const reservationId = route?.params?.reservation_id || new URLSearchParams(window.location.search).get('reservation_id');
+    if (reservationId) {
+      fetch(`${backendUrl}/api/reservations/${reservationId}`)
         .then(response => {
           if (!response.ok) {
             throw new Error('Failed to fetch reservation');
@@ -78,15 +81,16 @@ const ReservationForm = ({ route }) => {
           return response.json();
         })
         .then(data => {
+          const reservation = data.data;
           setFormData({
-            name: data.data.name,
-            email: data.data.email,
-            phone: data.data.phone,
-            date: data.data.date,
-            time: parseTimeString(data.data.time),
-            diners: data.data.diners.toString(),
-            seating: data.data.seating,
-            pickup: data.data.pickup
+            name: reservation.name,
+            email: reservation.email,
+            phone: reservation.phone,
+            date: reservation.date,
+            time: parseTimeString(reservation.time),
+            diners: reservation.diners.toString(),
+            seating: reservation.seating,
+            pickup: reservation.pickup
           });
         })
         .catch(error => {
@@ -94,7 +98,7 @@ const ReservationForm = ({ route }) => {
           Alert.alert("Error", "Could not load reservation details");
         });
     }
-  }, [route?.params?.reservationId]);
+  }, [route?.params]);
 
   // Helper function to parse time string
   const parseTimeString = (timeStr) => {
@@ -111,7 +115,6 @@ const ReservationForm = ({ route }) => {
   const handleSubmit = async () => {
     setIsSubmitting(true);
     try {
-      // Validate required fields
       if (!formData.name || !formData.email || !formData.date) {
         throw new Error('Please fill in all required fields');
       }

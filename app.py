@@ -197,16 +197,15 @@ def create_reservation():
             "message": "Internal server error"
         }), 500
 
-# Changed endpoint from /api/telegram-callback to /telegram-callback to match Telegram's expected webhook
 @app.route("/telegram-callback", methods=["POST"])
 def telegram_callback():
+    logger.info("Received Telegram callback")
     try:
         data = request.json
+        logger.debug(f"Callback data: {data}")
         if not data:
             logger.error("Empty Telegram callback received")
             return jsonify({"status": "error", "message": "Empty data"}), 400
-
-        logger.debug(f"Telegram callback: {data}")
 
         # Handle callback queries (button presses)
         if "callback_query" in data:
@@ -237,11 +236,9 @@ def telegram_callback():
             )
 
             if action == "accept":
-                # Update reservation status
                 reservation.status = "Confirmed"
                 db.session.commit()
                 
-                # Update Telegram message with visual feedback
                 update_telegram_message(
                     reservation_id,
                     f"✅ Accepted\n{original_text}",
@@ -255,8 +252,7 @@ def telegram_callback():
                     }
                 )
                 
-                # Send confirmation email
-                with app.app_context():  # Ensure app context for email sending
+                with app.app_context():
                     send_email_async(
                         app.app_context(),
                         "Reservation Confirmed",
@@ -268,10 +264,8 @@ def telegram_callback():
                 return jsonify({"status": "confirmed"}), 200
 
             elif action == "deny":
-                # Store the reservation ID for the denial flow
                 pending_denials[str(callback["message"]["chat"]["id"])] = reservation_id
                 
-                # Update Telegram message to show processing state
                 update_telegram_message(
                     reservation_id,
                     f"🔄 Processing Denial\n{original_text}",
@@ -285,7 +279,6 @@ def telegram_callback():
                     }
                 )
                 
-                # Ask for denial reason
                 requests.post(
                     f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
                     json={
@@ -298,7 +291,6 @@ def telegram_callback():
                 
                 return jsonify({"status": "awaiting_reason"}), 200
 
-        # Handle denial reason responses
         elif "message" in data and "reply_to_message" in data["message"]:
             message = data["message"]
             chat_id = str(message["chat"]["id"])
@@ -308,15 +300,12 @@ def telegram_callback():
                 if reservation:
                     reason = message.get("text", "No reason provided")
                     
-                    # Update reservation
                     reservation.denial_reason = reason
                     reservation.status = "Denied"
                     db.session.commit()
                     
-                    # Get the original message text
                     original_text = data["message"]["reply_to_message"]["text"].replace("🔄 Processing Denial\n", "")
                     
-                    # Update the original message with denial status
                     update_telegram_message(
                         reservation.id,
                         f"❌ Denied\n{original_text}\nReason: {reason}",
@@ -330,8 +319,9 @@ def telegram_callback():
                         }
                     )
                     
-                    # Send denial email
-                    with app.app_context():  # Ensure app context for email sending
+                    # Add booking link to denial email
+                    booking_url = f"https://lacasitabooking.onrender.com/book?reservation_id={reservation.id}"
+                    with app.app_context():
                         send_email_async(
                             app.app_context(),
                             "Reservation Denied",
@@ -339,10 +329,11 @@ def telegram_callback():
                             f"""Hello {reservation.name},<br><br>
                             Sorry, we cannot take your reservation request for {reservation.date} at {reservation.time}.<br><br>
                             Reason: {reason}<br><br>
+                            Click the button below to book a new time with your previous details:<br><br>
+                            <a href="{booking_url}" style="background-color: #4CAF50; color: white; padding: 10px 20px; text-align: center; text-decoration: none; display: inline-block; border-radius: 5px;">Book A New Time</a><br><br>
                             Please contact us if you have any questions."""
                         )
                     
-                    # Clean up
                     del pending_denials[chat_id]
                     return jsonify({"status": "denied"}), 200
 
