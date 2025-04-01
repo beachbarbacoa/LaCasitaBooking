@@ -1,4 +1,4 @@
-# TELEGRAM RESERVATION SYSTEM - COMPLETE VERSION (429 lines)
+# TELEGRAM RESERVATION SYSTEM - COMPLETE VERSION
 from flask import Flask, jsonify, request, abort
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -243,12 +243,12 @@ def telegram_callback():
                 # Update Telegram message with visual feedback
                 update_telegram_message(
                     reservation_id,
-                    f"✅ ACCEPTED\n{original_text}",
+                    f"✅ Accepted\n{original_text}",
                     {
                         "inline_keyboard": [
                             [
-                                {"text": "✓ Accepted", "callback_data": "already_processed", "disabled": True},
-                                {"text": "✗ Deny", "callback_data": "already_processed", "disabled": True}
+                                {"text": "Accepted", "callback_data": f"done_{reservation_id}"},
+                                {"text": "Deny", "callback_data": f"done_{reservation_id}"}
                             ]
                         ]
                     }
@@ -260,8 +260,7 @@ def telegram_callback():
                     "Reservation Confirmed",
                     reservation.email,
                     f"Hello {reservation.name},<br><br>" +
-                    f"Your reservation for {reservation.date} at {reservation.time} is confirmed!<br><br>" +
-                    "We look forward to seeing you."
+                    f"Your reservation has been confirmed. We look forward to seeing you at {reservation.time} on {reservation.date}.<br><br>"
                 )
                 
                 return jsonify({"status": "confirmed"})
@@ -273,12 +272,12 @@ def telegram_callback():
                 # Update Telegram message to show processing state
                 update_telegram_message(
                     reservation_id,
-                    f"🔄 PROCESSING DENIAL\n{original_text}",
+                    f"🔄 Processing Denial\n{original_text}",
                     {
                         "inline_keyboard": [
                             [
-                                {"text": "✓ Accept", "callback_data": "already_processing", "disabled": True},
-                                {"text": "✗ Processing...", "callback_data": "already_processing", "disabled": True}
+                                {"text": "Accept", "callback_data": "already_processing", "disabled": True},
+                                {"text": "Processing...", "callback_data": "already_processing", "disabled": True}
                             ]
                         ]
                     }
@@ -313,17 +312,17 @@ def telegram_callback():
                     db.session.commit()
                     
                     # Get the original message text
-                    original_text = data["message"]["reply_to_message"]["text"].replace("🔄 PROCESSING DENIAL\n", "")
+                    original_text = data["message"]["reply_to_message"]["text"].replace("🔄 Processing Denial\n", "")
                     
                     # Update the original message with denial status
                     update_telegram_message(
                         reservation.id,
-                        f"❌ DENIED\n{original_text}\nReason: {reason}",
+                        f"❌ Denied\n{original_text}\nReason: {reason}",
                         {
                             "inline_keyboard": [
                                 [
-                                    {"text": "✓ Accept", "callback_data": "already_processed", "disabled": True},
-                                    {"text": "✗ Denied", "callback_data": "already_processed", "disabled": True}
+                                    {"text": "Accept", "callback_data": f"done_{reservation.id}"},
+                                    {"text": "Denied", "callback_data": f"done_{reservation.id}"}
                                 ]
                             ]
                         }
@@ -335,7 +334,7 @@ def telegram_callback():
                         "Reservation Denied",
                         reservation.email,
                         f"""Hello {reservation.name},<br><br>
-                        We're sorry, but your reservation for {reservation.date} at {reservation.time} was denied.<br><br>
+                        Sorry, we cannot take your reservation request for {reservation.date} at {reservation.time}.<br><br>
                         Reason: {reason}<br><br>
                         Please contact us if you have any questions."""
                     )
@@ -435,5 +434,5 @@ def test_endpoint():
         }), 500
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8080))
+    port = int(os.getenvizioso("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
