@@ -13,6 +13,7 @@ const ReservationForm = () => {
     pickup: 'no'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [reservationIdInput, setReservationIdInput] = useState(''); // For manual testing in Expo Snack
   const backendUrl = "https://lacasitabooking.onrender.com";
 
   // Date picker logic
@@ -67,36 +68,43 @@ const ReservationForm = () => {
     }));
   };
 
-  // Load reservation data from URL query string (for Expo Snack web)
+  // Load reservation data from reservation_id
+  const loadReservationData = (reservationId) => {
+    if (reservationId) {
+      fetch(`${backendUrl}/api/reservations/${reservationId}`)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Failed to fetch reservation');
+          }
+          return response.json();
+        })
+        .then(data => {
+          const reservation = data.data;
+          setFormData({
+            name: reservation.name,
+            email: reservation.email,
+            phone: reservation.phone,
+            date: reservation.date,
+            time: parseTimeString(reservation.time),
+            diners: reservation.diners.toString(),
+            seating: reservation.seating,
+            pickup: reservation.pickup
+          });
+        })
+        .catch(error => {
+          console.error("Error loading reservation:", error);
+          Alert.alert("Error", "Could not load reservation details");
+        });
+    }
+  };
+
+  // Check for reservation_id in URL (web) or use manual input (Expo Snack)
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       const reservationId = params.get('reservation_id');
       if (reservationId) {
-        fetch(`${backendUrl}/api/reservations/${reservationId}`)
-          .then(response => {
-            if (!response.ok) {
-              throw new Error('Failed to fetch reservation');
-            }
-            return response.json();
-          })
-          .then(data => {
-            const reservation = data.data;
-            setFormData({
-              name: reservation.name,
-              email: reservation.email,
-              phone: reservation.phone,
-              date: reservation.date,
-              time: parseTimeString(reservation.time),
-              diners: reservation.diners.toString(),
-              seating: reservation.seating,
-              pickup: reservation.pickup
-            });
-          })
-          .catch(error => {
-            console.error("Error loading reservation:", error);
-            Alert.alert("Error", "Could not load reservation details");
-          });
+        loadReservationData(reservationId);
       }
     } catch (e) {
       console.log("Not running in a browser environment or no query params");
@@ -182,6 +190,20 @@ const ReservationForm = () => {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      {/* Add a manual input for testing reservation_id in Expo Snack */}
+      <Text style={styles.label}>Test Reservation ID (for Expo Snack):</Text>
+      <TextInput
+        style={styles.input}
+        value={reservationIdInput}
+        onChangeText={setReservationIdInput}
+        placeholder="Enter reservation ID"
+        keyboardType="numeric"
+      />
+      <Button
+        title="Load Reservation Data"
+        onPress={() => loadReservationData(reservationIdInput)}
+      />
+
       <Text style={styles.label}>Name:</Text>
       <TextInput
         style={styles.input}

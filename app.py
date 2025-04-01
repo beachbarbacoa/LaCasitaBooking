@@ -319,8 +319,9 @@ def telegram_callback():
                         }
                     )
                     
-                    # Add booking link to denial email
-                    booking_url = f"https://lacasitabooking.onrender.com/book?reservation_id={reservation.id}"
+                    # Update booking link to point to Expo Snack URL
+                    # Replace this with your actual Expo Snack URL
+                    booking_url = f"https://snack.expo.dev/@beachbar/la-casita-booking?reservation_id={reservation.id}"
                     with app.app_context():
                         send_email_async(
                             app.app_context(),
