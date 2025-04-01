@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, Button, StyleSheet, Alert, ScrollView, TouchableOpacity, FlatList } from 'react-native';
-import { useRoute } from '@react-navigation/native'; // Add this for route handling
 
 const ReservationForm = () => {
-  const route = useRoute(); // Hook to access route params
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -69,36 +67,41 @@ const ReservationForm = () => {
     }));
   };
 
-  // Load reservation data from URL parameter
+  // Load reservation data from URL query string (for Expo Snack web)
   useEffect(() => {
-    const reservationId = route?.params?.reservation_id || new URLSearchParams(window.location.search).get('reservation_id');
-    if (reservationId) {
-      fetch(`${backendUrl}/api/reservations/${reservationId}`)
-        .then(response => {
-          if (!response.ok) {
-            throw new Error('Failed to fetch reservation');
-          }
-          return response.json();
-        })
-        .then(data => {
-          const reservation = data.data;
-          setFormData({
-            name: reservation.name,
-            email: reservation.email,
-            phone: reservation.phone,
-            date: reservation.date,
-            time: parseTimeString(reservation.time),
-            diners: reservation.diners.toString(),
-            seating: reservation.seating,
-            pickup: reservation.pickup
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const reservationId = params.get('reservation_id');
+      if (reservationId) {
+        fetch(`${backendUrl}/api/reservations/${reservationId}`)
+          .then(response => {
+            if (!response.ok) {
+              throw new Error('Failed to fetch reservation');
+            }
+            return response.json();
+          })
+          .then(data => {
+            const reservation = data.data;
+            setFormData({
+              name: reservation.name,
+              email: reservation.email,
+              phone: reservation.phone,
+              date: reservation.date,
+              time: parseTimeString(reservation.time),
+              diners: reservation.diners.toString(),
+              seating: reservation.seating,
+              pickup: reservation.pickup
+            });
+          })
+          .catch(error => {
+            console.error("Error loading reservation:", error);
+            Alert.alert("Error", "Could not load reservation details");
           });
-        })
-        .catch(error => {
-          console.error("Error loading reservation:", error);
-          Alert.alert("Error", "Could not load reservation details");
-        });
+      }
+    } catch (e) {
+      console.log("Not running in a browser environment or no query params");
     }
-  }, [route?.params]);
+  }, []);
 
   // Helper function to parse time string
   const parseTimeString = (timeStr) => {
