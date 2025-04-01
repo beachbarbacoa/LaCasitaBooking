@@ -70,7 +70,7 @@ def send_email_async(app_context, subject, recipient, body):
                     server.send_message(msg)
                 logger.info(f"Email sent to {recipient}")
             except Exception as e:
-                logger.error(f"Email failed: {str(e)}")
+                logger.error(f"Email sending failed: {str(e)}")
     Thread(target=send_email).start()
 
 def send_telegram_async(app_context, reservation):
@@ -197,7 +197,8 @@ def create_reservation():
             "message": "Internal server error"
         }), 500
 
-@app.route("/api/telegram-callback", methods=["POST"])
+# Changed endpoint from /api/telegram-callback to /telegram-callback to match Telegram's expected webhook
+@app.route("/telegram-callback", methods=["POST"])
 def telegram_callback():
     try:
         data = request.json
@@ -255,15 +256,16 @@ def telegram_callback():
                 )
                 
                 # Send confirmation email
-                send_email_async(
-                    app.app_context(),
-                    "Reservation Confirmed",
-                    reservation.email,
-                    f"Hello {reservation.name},<br><br>" +
-                    f"Your reservation has been confirmed. We look forward to seeing you at {reservation.time} on {reservation.date}.<br><br>"
-                )
+                with app.app_context():  # Ensure app context for email sending
+                    send_email_async(
+                        app.app_context(),
+                        "Reservation Confirmed",
+                        reservation.email,
+                        f"Hello {reservation.name},<br><br>" +
+                        f"Your reservation has been confirmed. We look forward to seeing you at {reservation.time} on {reservation.date}.<br><br>"
+                    )
                 
-                return jsonify({"status": "confirmed"})
+                return jsonify({"status": "confirmed"}), 200
 
             elif action == "deny":
                 # Store the reservation ID for the denial flow
@@ -294,7 +296,7 @@ def telegram_callback():
                     }
                 )
                 
-                return jsonify({"status": "awaiting_reason"})
+                return jsonify({"status": "awaiting_reason"}), 200
 
         # Handle denial reason responses
         elif "message" in data and "reply_to_message" in data["message"]:
@@ -329,19 +331,20 @@ def telegram_callback():
                     )
                     
                     # Send denial email
-                    send_email_async(
-                        app.app_context(),
-                        "Reservation Denied",
-                        reservation.email,
-                        f"""Hello {reservation.name},<br><br>
-                        Sorry, we cannot take your reservation request for {reservation.date} at {reservation.time}.<br><br>
-                        Reason: {reason}<br><br>
-                        Please contact us if you have any questions."""
-                    )
+                    with app.app_context():  # Ensure app context for email sending
+                        send_email_async(
+                            app.app_context(),
+                            "Reservation Denied",
+                            reservation.email,
+                            f"""Hello {reservation.name},<br><br>
+                            Sorry, we cannot take your reservation request for {reservation.date} at {reservation.time}.<br><br>
+                            Reason: {reason}<br><br>
+                            Please contact us if you have any questions."""
+                        )
                     
                     # Clean up
                     del pending_denials[chat_id]
-                    return jsonify({"status": "denied"})
+                    return jsonify({"status": "denied"}), 200
 
         return jsonify({"status": "ignored"}), 200
 
@@ -410,7 +413,7 @@ def catch_all(path):
         "valid_endpoints": [
             "/api/reservations",
             "/api/reservations/<id>",
-            "/api/telegram-callback",
+            "/telegram-callback",
             "/test"
         ]
     }), 404
@@ -434,5 +437,5 @@ def test_endpoint():
         }), 500
 
 if __name__ == "__main__":
-    port = int(os.getenvizioso("PORT", 8080))
+    port = int(os.getenv("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
