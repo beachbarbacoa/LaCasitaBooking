@@ -319,8 +319,7 @@ def telegram_callback():
                         }
                     )
                     
-                    # Update booking link to point to Expo Snack URL
-                    # Replace this with your actual Expo Snack URL
+                    # Update booking URL to point to Expo Snack web preview
                     booking_url = f"https://snack.expo.dev/@beachbar/la-casita-booking?reservation_id={reservation.id}"
                     with app.app_context():
                         send_email_async(
