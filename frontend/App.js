@@ -13,8 +13,9 @@ const ReservationForm = () => {
     pickup: 'no'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [reservationIdInput, setReservationIdInput] = useState(''); // For manual testing in Expo Snack
   const backendUrl = "https://lacasitabooking.onrender.com";
+  const [reservationId, setReservationId] = useState(null);
+  const [token, setToken] = useState(null); // Add state for token
 
   // Date picker logic
   const today = new Date();
@@ -68,10 +69,28 @@ const ReservationForm = () => {
     }));
   };
 
-  // Load reservation data from reservation_id
-  const loadReservationData = (reservationId) => {
-    if (reservationId) {
-      fetch(`${backendUrl}/api/reservations/${reservationId}`)
+  // Load reservation data
+  useEffect(() => {
+    let idToFetch = reservationId;
+    let tokenToFetch = token;
+
+    // Try to get reservation_id and token from URL if in a browser environment
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlReservationId = params.get('reservation_id');
+      const urlToken = params.get('token');
+      if (urlReservationId) {
+        idToFetch = urlReservationId;
+      }
+      if (urlToken) {
+        tokenToFetch = urlToken;
+      }
+    } catch (e) {
+      console.log("Not running in a browser environment or no query params");
+    }
+
+    if (idToFetch && tokenToFetch) {
+      fetch(`${backendUrl}/api/reservations/${idToFetch}?token=${tokenToFetch}`)
         .then(response => {
           if (!response.ok) {
             throw new Error('Failed to fetch reservation');
@@ -96,20 +115,7 @@ const ReservationForm = () => {
           Alert.alert("Error", "Could not load reservation details");
         });
     }
-  };
-
-  // Check for reservation_id in URL (web) or use manual input (Expo Snack)
-  useEffect(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const reservationId = params.get('reservation_id');
-      if (reservationId) {
-        loadReservationData(reservationId);
-      }
-    } catch (e) {
-      console.log("Not running in a browser environment or no query params");
-    }
-  }, []);
+  }, [reservationId, token]);
 
   // Helper function to parse time string
   const parseTimeString = (timeStr) => {
@@ -172,6 +178,8 @@ const ReservationForm = () => {
               seating: 'inside',
               pickup: 'no'
             });
+            setReservationId(null);
+            setToken(null); // Reset token after submission
           }
         }]
       );
@@ -190,18 +198,21 @@ const ReservationForm = () => {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      {/* Add a manual input for testing reservation_id in Expo Snack */}
-      <Text style={styles.label}>Test Reservation ID (for Expo Snack):</Text>
+      {/* Add a field to manually set reservationId for testing in mobile */}
+      <Text style={styles.label}>Reservation ID (for testing):</Text>
       <TextInput
         style={styles.input}
-        value={reservationIdInput}
-        onChangeText={setReservationIdInput}
+        value={reservationId || ''}
+        onChangeText={(text) => setReservationId(text)}
         placeholder="Enter reservation ID"
         keyboardType="numeric"
       />
-      <Button
-        title="Load Reservation Data"
-        onPress={() => loadReservationData(reservationIdInput)}
+      <Text style={styles.label}>Token (for testing):</Text>
+      <TextInput
+        style={styles.input}
+        value={token || ''}
+        onChangeText={(text) => setToken(text)}
+        placeholder="Enter token"
       />
 
       <Text style={styles.label}>Name:</Text>
