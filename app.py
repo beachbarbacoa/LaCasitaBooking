@@ -10,6 +10,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from threading import Thread
 from datetime import datetime
+import uuid  # For generating unique tokens
 
 app = Flask(__name__)
 CORS(app)
@@ -36,6 +37,7 @@ class Reservation(db.Model):
     pickup = db.Column(db.String(10), nullable=False)
     status = db.Column(db.String(20), default="Pending", nullable=True)
     denial_reason = db.Column(db.String(200), nullable=True)
+    token = db.Column(db.String(36), nullable=False, unique=True)  # Add token field
 
 # Email configuration
 app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.sendgrid.net')
@@ -158,6 +160,7 @@ def create_reservation():
         except ValueError:
             abort(400, "Invalid date format. Use YYYY-MM-DD")
 
+        # Generate a unique token for the reservation
         reservation = Reservation(
             name=data["name"],
             email=data["email"],
@@ -166,7 +169,8 @@ def create_reservation():
             date=data["date"],
             diners=int(data["diners"]),
             seating=data["seating"],
-            pickup=data["pickup"]
+            pickup=data["pickup"],
+            token=str(uuid.uuid4())  # Generate unique token
         )
 
         db.session.add(reservation)
@@ -319,8 +323,8 @@ def telegram_callback():
                         }
                     )
                     
-                    # Update booking URL to point to Expo Snack web preview
-                    booking_url = f"https://snack.expo.dev/@beachbar/la-casita-booking?reservation_id={reservation.id}"
+                    # Update booking URL to include token
+                    booking_url = f"https://snack.expo.dev/@beachbar/la-casita-booking?reservation_id={reservation.id}&token={reservation.token}"
                     with app.app_context():
                         send_email_async(
                             app.app_context(),
@@ -349,7 +353,15 @@ def telegram_callback():
 @app.route("/api/reservations/<int:reservation_id>", methods=["GET"])
 def get_reservation(reservation_id):
     try:
+        # Get token from query parameter
+        token = request.args.get('token')
+        if not token:
+            abort(401, "Token is required")
+
         reservation = Reservation.query.get_or_404(reservation_id)
+        if reservation.token != token:
+            abort(403, "Invalid token")
+
         return jsonify({
             "status": "success",
             "data": {
@@ -369,7 +381,7 @@ def get_reservation(reservation_id):
         logger.error(f"Failed to get reservation: {str(e)}")
         return jsonify({
             "status": "error",
-            "message": "Reservation not found"
+            "message": "Reservation not found or invalid token"
         }), 404
 
 @app.route("/api/reservations", methods=["GET"])
@@ -426,7 +438,14 @@ def test_endpoint():
             "database": "disconnected",
             "error": str(e)
         }), 500
-
+@app.route("/reset-db", methods=["POST"])
+def reset_db():
+    try:
+        db.drop_all()
+        db.create_all()
+        return jsonify({"status": "success", "message": "Database reset"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
