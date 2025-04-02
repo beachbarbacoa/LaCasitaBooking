@@ -438,14 +438,7 @@ def test_endpoint():
             "database": "disconnected",
             "error": str(e)
         }), 500
-@app.route("/reset-db", methods=["POST"])
-def reset_db():
-    try:
-        db.drop_all()
-        db.create_all()
-        return jsonify({"status": "success", "message": "Database reset"}), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
