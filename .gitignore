@@ -1,1 +1,2 @@
-frontend/la-casita-booking
+frontend/la-casita-booking/*
+!frontend/la-casita-booking/.git
