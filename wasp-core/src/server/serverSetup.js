@@ -7,11 +7,12 @@ export const setupServer = (app) => {
   app.use(api);
 
   // Serve static files from React build
-  const __dirname = path.resolve();
-  app.use(express.static(path.join(__dirname, '../client/build')));
+  // Use absolute path for production build
+  const clientBuildPath = path.resolve(process.cwd(), 'client/build');
+  app.use(express.static(clientBuildPath));
   
   // Handle React routing - return all requests to React app
   app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../client/build', 'index.html'));
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
   });
 };
