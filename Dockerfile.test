@@ -1,0 +1,10 @@
+FROM node:20-slim
+
+RUN apt-get update && apt-get install -y curl
+
+RUN curl -sSL https://get.wasp-lang.dev/installer.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+RUN wasp version
+
+CMD ["wasp", "version"]

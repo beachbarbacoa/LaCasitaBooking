@@ -1,0 +1,16 @@
+app lacasita {
+  title: "La Casita Booking",
+  head: [
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+  ],
+}
+
+route RootRoute { path: "/", to: MainPage }
+page MainPage {
+  component: import Main from "@client/MainPage.jsx"
+}
+
+// Add static file serving
+server {
+  setupFn: import { setupServer } from "@server/serverSetup.js"
+}
