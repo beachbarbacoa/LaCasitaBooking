@@ -11,7 +11,7 @@ export const setupServer = (app) => {
   console.log('[SERVER] API routes registered');
 
   // Use absolute path for production build
-  const clientBuildPath = path.resolve(process.cwd(), 'client/build');
+  const clientBuildPath = path.resolve(process.cwd(), 'build');
   console.log(`[SERVER] Static file path: ${clientBuildPath}`);
   
   // Verify build directory exists
@@ -25,7 +25,14 @@ export const setupServer = (app) => {
     console.error('[ERROR] Failed to access build directory:', err.message);
   }
 
+  // Serve static files
   app.use(express.static(clientBuildPath));
+  
+  // Serve index.html for all routes
+  app.get('*', (req, res) => {
+    console.log(`[ROUTING] Serving index.html for: ${req.path}`);
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
+  });
   console.log('[SERVER] Static file serving enabled');
   
   // Health check endpoint
